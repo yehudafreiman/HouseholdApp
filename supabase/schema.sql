@@ -50,7 +50,8 @@ create table if not exists public.messages (
   -- `profiles(username)` in a `select` on this table.
   user_id uuid not null references public.profiles (id) on delete cascade,
   content text not null check (char_length(trim(content)) > 0),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 alter table public.messages enable row level security;
@@ -65,7 +66,18 @@ create policy "Users can insert their own messages"
   to authenticated
   with check (auth.uid() = user_id);
 
-grant select, insert on public.messages to authenticated;
+create policy "Users can update their own messages"
+  on public.messages for update
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "Users can delete their own messages"
+  on public.messages for delete
+  to authenticated
+  using (auth.uid() = user_id);
+
+grant select, insert, update, delete on public.messages to authenticated;
 
 -- 4. Turn on Realtime for the messages table.
 alter publication supabase_realtime add table public.messages;

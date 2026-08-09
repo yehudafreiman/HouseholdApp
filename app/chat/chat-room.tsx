@@ -2,15 +2,26 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import type {
+  RealtimeChannel,
+  RealtimePostgresInsertPayload,
+  RealtimePostgresUpdatePayload,
+  RealtimePostgresDeletePayload,
+} from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 
-type Message = {
+type MessageRow = {
   id: number;
   content: string;
   created_at: string;
+  updated_at: string;
   user_id: string;
-  username: string;
 };
+
+type Message = MessageRow & { username: string };
+
+const TYPING_TIMEOUT_MS = 3000;
+const TYPING_BROADCAST_INTERVAL_MS = 1500;
 
 export default function ChatRoom({
   currentUserId,
@@ -25,10 +36,20 @@ export default function ChatRoom({
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editContent, setEditContent] = useState("");
+  const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const bottomRef = useRef<HTMLDivElement>(null);
   const usernameCache = useRef<Map<string, string>>(
     new Map(initialMessages.map((m) => [m.user_id, m.username]))
   );
+  const channelRef = useRef<ReturnType<
+    ReturnType<typeof createClient>["channel"]
+  > | null>(null);
+  const typingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map()
+  );
+  const lastTypingSentRef = useRef(0);
 
   useEffect(() => {
     usernameCache.current.set(currentUserId, currentUsername);
@@ -40,29 +61,55 @@ export default function ChatRoom({
 
   useEffect(() => {
     const supabase = createClient();
+    const typingTimeouts = typingTimeoutsRef.current;
 
-    const handleInsert: (payload: {
-      new: { id: number; content: string; created_at: string; user_id: string };
-    }) => void = async (payload) => {
+    async function resolveUsername(userId: string) {
+      const cached = usernameCache.current.get(userId);
+      if (cached) return cached;
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("username")
+        .eq("id", userId)
+        .single();
+      const username = profile?.username ?? "משתמש";
+      usernameCache.current.set(userId, username);
+      return username;
+    }
+
+    const handleInsert = async (
+      payload: RealtimePostgresInsertPayload<MessageRow>
+    ) => {
       const row = payload.new;
-
-      const cached = usernameCache.current.get(row.user_id);
-      let username: string;
-      if (cached) {
-        username = cached;
-      } else {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("username")
-          .eq("id", row.user_id)
-          .single();
-        username = profile?.username ?? "משתמש";
-        usernameCache.current.set(row.user_id, username);
-      }
+      const username = await resolveUsername(row.user_id);
 
       setMessages((prev) =>
         prev.some((m) => m.id === row.id) ? prev : [...prev, { ...row, username }]
       );
+
+      setTypingUsers((prev) => {
+        if (!prev.has(row.user_id)) return prev;
+        const next = new Map(prev);
+        next.delete(row.user_id);
+        return next;
+      });
+    };
+
+    const handleUpdate = async (
+      payload: RealtimePostgresUpdatePayload<MessageRow>
+    ) => {
+      const row = payload.new;
+      const username = await resolveUsername(row.user_id);
+
+      setMessages((prev) =>
+        prev.map((m) => (m.id === row.id ? { ...row, username } : m))
+      );
+    };
+
+    const handleDelete = (payload: RealtimePostgresDeletePayload<MessageRow>) => {
+      const deletedId = payload.old.id;
+      if (deletedId === undefined) return;
+      setMessages((prev) => prev.filter((m) => m.id !== deletedId));
     };
 
     const {
@@ -83,22 +130,77 @@ export default function ChatRoom({
       if (session) await supabase.realtime.setAuth(session.access_token);
       if (cancelled) return;
 
-      channel = supabase
-        .channel("messages-changes")
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "messages" },
-          handleInsert
-        )
-        .subscribe();
+      // Each `.on()` call is assigned separately (rather than chained) —
+      // chaining several different event-type overloads back to back
+      // confuses TS's overload resolution for this client. `ch` is typed
+      // explicitly so each call resolves against the full overload set
+      // instead of the previous call's narrowed return type.
+      let ch: RealtimeChannel = supabase.channel("messages-changes");
+      ch = ch.on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        handleInsert
+      );
+      ch = ch.on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages" },
+        handleUpdate
+      );
+      ch = ch.on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "messages" },
+        handleDelete
+      );
+      ch = ch.on("broadcast", { event: "typing" }, ({ payload }) => {
+        const { user_id, username } = payload as {
+          user_id: string;
+          username: string;
+        };
+        if (user_id === currentUserId) return;
+
+        setTypingUsers((prev) => new Map(prev).set(user_id, username));
+
+        const existingTimeout = typingTimeouts.get(user_id);
+        if (existingTimeout) clearTimeout(existingTimeout);
+        typingTimeouts.set(
+          user_id,
+          setTimeout(() => {
+            setTypingUsers((prev) => {
+              const next = new Map(prev);
+              next.delete(user_id);
+              return next;
+            });
+            typingTimeouts.delete(user_id);
+          }, TYPING_TIMEOUT_MS)
+        );
+      });
+      ch.subscribe();
+
+      channel = ch;
+      channelRef.current = channel;
     });
 
     return () => {
       cancelled = true;
       subscription.unsubscribe();
+      typingTimeouts.forEach((t) => clearTimeout(t));
+      typingTimeouts.clear();
       if (channel) supabase.removeChannel(channel);
+      channelRef.current = null;
     };
-  }, []);
+  }, [currentUserId]);
+
+  function notifyTyping() {
+    const now = Date.now();
+    if (now - lastTypingSentRef.current < TYPING_BROADCAST_INTERVAL_MS) return;
+    lastTypingSentRef.current = now;
+
+    channelRef.current?.send({
+      type: "broadcast",
+      event: "typing",
+      payload: { user_id: currentUserId, username: currentUsername },
+    });
+  }
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
@@ -117,12 +219,50 @@ export default function ChatRoom({
     setSending(false);
   }
 
+  function startEdit(m: Message) {
+    setEditingId(m.id);
+    setEditContent(m.content);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditContent("");
+  }
+
+  async function saveEdit(id: number) {
+    const trimmed = editContent.trim();
+    if (!trimmed) return;
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("messages")
+      .update({ content: trimmed, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("user_id", currentUserId);
+
+    if (!error) {
+      cancelEdit();
+    }
+  }
+
+  async function handleDeleteMessage(id: number) {
+    const supabase = createClient();
+    await supabase.from("messages").delete().eq("id", id).eq("user_id", currentUserId);
+  }
+
   async function handleSignOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();
   }
+
+  const typingLabel =
+    typingUsers.size === 0
+      ? null
+      : typingUsers.size === 1
+        ? `${[...typingUsers.values()][0]} מקליד/ה...`
+        : `${[...typingUsers.values()].join(", ")} מקלידים...`;
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
@@ -141,28 +281,85 @@ export default function ChatRoom({
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
         {messages.map((m) => {
           const isMine = m.user_id === currentUserId;
+          const isEditing = editingId === m.id;
+          const wasEdited = m.updated_at !== m.created_at;
+
           return (
             <div
               key={m.id}
-              className={`flex flex-col max-w-[75%] ${isMine ? "self-end items-end" : "self-start items-start"}`}
+              className={`group flex flex-col max-w-[75%] ${isMine ? "self-end items-end" : "self-start items-start"}`}
             >
               {!isMine && (
                 <span className="text-xs text-zinc-500 mb-1">{m.username}</span>
               )}
-              <div
-                className={`rounded-2xl px-4 py-2 text-sm ${
-                  isMine
-                    ? "bg-foreground text-background"
-                    : "bg-white dark:bg-zinc-900 border border-black/10 dark:border-white/10"
-                }`}
-              >
-                {m.content}
-              </div>
+
+              {isEditing ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    autoFocus
+                    className="rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+                  />
+                  <button
+                    onClick={() => saveEdit(m.id)}
+                    className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                  >
+                    שמירה
+                  </button>
+                  <button
+                    onClick={cancelEdit}
+                    className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                  >
+                    ביטול
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  {isMine && (
+                    <span className="hidden group-hover:flex items-center gap-2 text-xs text-zinc-500">
+                      <button
+                        onClick={() => startEdit(m)}
+                        className="hover:text-zinc-800 dark:hover:text-zinc-200"
+                      >
+                        עריכה
+                      </button>
+                      <button
+                        onClick={() => handleDeleteMessage(m.id)}
+                        className="hover:text-red-600"
+                      >
+                        מחיקה
+                      </button>
+                    </span>
+                  )}
+                  <div
+                    className={`rounded-2xl px-4 py-2 text-sm ${
+                      isMine
+                        ? "bg-foreground text-background"
+                        : "bg-white dark:bg-zinc-900 border border-black/10 dark:border-white/10"
+                    }`}
+                  >
+                    {m.content}
+                    {wasEdited && (
+                      <span
+                        className={`text-[10px] mr-2 ${isMine ? "opacity-70" : "text-zinc-400"}`}
+                      >
+                        נערך
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
         <div ref={bottomRef} />
       </div>
+
+      {typingLabel && (
+        <div className="px-4 pb-1 text-xs text-zinc-500">{typingLabel}</div>
+      )}
 
       <form
         onSubmit={handleSend}
@@ -171,7 +368,10 @@ export default function ChatRoom({
         <input
           type="text"
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          onChange={(e) => {
+            setContent(e.target.value);
+            notifyTyping();
+          }}
           placeholder="הקלד/י הודעה..."
           className="flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
         />
