@@ -39,6 +39,7 @@ export default function ChatRoom({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState("");
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
+  const [onlineUsers, setOnlineUsers] = useState<Map<string, string>>(new Map());
   const bottomRef = useRef<HTMLDivElement>(null);
   const usernameCache = useRef<Map<string, string>>(
     new Map(initialMessages.map((m) => [m.user_id, m.username]))
@@ -135,7 +136,9 @@ export default function ChatRoom({
       // confuses TS's overload resolution for this client. `ch` is typed
       // explicitly so each call resolves against the full overload set
       // instead of the previous call's narrowed return type.
-      let ch: RealtimeChannel = supabase.channel("messages-changes");
+      let ch: RealtimeChannel = supabase.channel("messages-changes", {
+        config: { presence: { key: currentUserId } },
+      });
       ch = ch.on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
@@ -174,7 +177,19 @@ export default function ChatRoom({
           }, TYPING_TIMEOUT_MS)
         );
       });
-      ch.subscribe();
+      ch = ch.on("presence", { event: "sync" }, () => {
+        const state = ch.presenceState<{ username: string }>();
+        const next = new Map<string, string>();
+        for (const [userId, presences] of Object.entries(state)) {
+          if (presences[0]) next.set(userId, presences[0].username);
+        }
+        setOnlineUsers(next);
+      });
+      ch.subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await ch.track({ username: currentUsername });
+        }
+      });
 
       channel = ch;
       channelRef.current = channel;
@@ -188,7 +203,7 @@ export default function ChatRoom({
       if (channel) supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [currentUserId]);
+  }, [currentUserId, currentUsername]);
 
   function notifyTyping() {
     const now = Date.now();
@@ -264,12 +279,24 @@ export default function ChatRoom({
         ? `${[...typingUsers.values()][0]} מקליד/ה...`
         : `${[...typingUsers.values()].join(", ")} מקלידים...`;
 
+  const onlineOthers = [...onlineUsers.entries()]
+    .filter(([userId]) => userId !== currentUserId)
+    .map(([, username]) => username);
+
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
       <header className="flex items-center justify-between border-b border-black/10 dark:border-white/10 px-4 py-3">
-        <span className="text-sm text-zinc-500">
-          מחובר/ת בתור <span className="font-medium text-foreground">{currentUsername}</span>
-        </span>
+        <div className="flex flex-col">
+          <span className="text-sm text-zinc-500">
+            מחובר/ת בתור <span className="font-medium text-foreground">{currentUsername}</span>
+          </span>
+          {onlineOthers.length > 0 && (
+            <span className="flex items-center gap-1 text-xs text-zinc-400 mt-0.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+              {onlineOthers.join(", ")} מחובר/ים כרגע
+            </span>
+          )}
+        </div>
         <button
           onClick={handleSignOut}
           className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
@@ -290,7 +317,12 @@ export default function ChatRoom({
               className={`group flex flex-col max-w-[75%] ${isMine ? "self-end items-end" : "self-start items-start"}`}
             >
               {!isMine && (
-                <span className="text-xs text-zinc-500 mb-1">{m.username}</span>
+                <span className="flex items-center gap-1 text-xs text-zinc-500 mb-1">
+                  {onlineUsers.has(m.user_id) && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                  )}
+                  {m.username}
+                </span>
               )}
 
               {isEditing ? (
