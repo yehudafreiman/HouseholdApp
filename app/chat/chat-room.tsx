@@ -18,10 +18,20 @@ type MessageRow = {
   user_id: string;
 };
 
-type Message = MessageRow & { username: string };
+type ReactionRow = {
+  id: number;
+  message_id: number;
+  user_id: string;
+  emoji: string;
+};
+
+type Reaction = { id: number; emoji: string; user_id: string; username: string };
+
+type Message = MessageRow & { username: string; reactions: Reaction[] };
 
 const TYPING_TIMEOUT_MS = 3000;
 const TYPING_BROADCAST_INTERVAL_MS = 1500;
+const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢"];
 
 export default function ChatRoom({
   currentUserId,
@@ -85,7 +95,9 @@ export default function ChatRoom({
       const username = await resolveUsername(row.user_id);
 
       setMessages((prev) =>
-        prev.some((m) => m.id === row.id) ? prev : [...prev, { ...row, username }]
+        prev.some((m) => m.id === row.id)
+          ? prev
+          : [...prev, { ...row, username, reactions: [] }]
       );
 
       setTypingUsers((prev) => {
@@ -103,7 +115,9 @@ export default function ChatRoom({
       const username = await resolveUsername(row.user_id);
 
       setMessages((prev) =>
-        prev.map((m) => (m.id === row.id ? { ...row, username } : m))
+        prev.map((m) =>
+          m.id === row.id ? { ...row, username, reactions: m.reactions } : m
+        )
       );
     };
 
@@ -111,6 +125,41 @@ export default function ChatRoom({
       const deletedId = payload.old.id;
       if (deletedId === undefined) return;
       setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+    };
+
+    const handleReactionInsert = async (
+      payload: RealtimePostgresInsertPayload<ReactionRow>
+    ) => {
+      const row = payload.new;
+      const username = await resolveUsername(row.user_id);
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === row.message_id && !m.reactions.some((r) => r.id === row.id)
+            ? {
+                ...m,
+                reactions: [
+                  ...m.reactions,
+                  { id: row.id, emoji: row.emoji, user_id: row.user_id, username },
+                ],
+              }
+            : m
+        )
+      );
+    };
+
+    const handleReactionDelete = (
+      payload: RealtimePostgresDeletePayload<ReactionRow>
+    ) => {
+      const deletedId = payload.old.id;
+      if (deletedId === undefined) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.reactions.some((r) => r.id === deletedId)
+            ? { ...m, reactions: m.reactions.filter((r) => r.id !== deletedId) }
+            : m
+        )
+      );
     };
 
     const {
@@ -153,6 +202,16 @@ export default function ChatRoom({
         "postgres_changes",
         { event: "DELETE", schema: "public", table: "messages" },
         handleDelete
+      );
+      ch = ch.on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "message_reactions" },
+        handleReactionInsert
+      );
+      ch = ch.on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "message_reactions" },
+        handleReactionDelete
       );
       ch = ch.on("broadcast", { event: "typing" }, ({ payload }) => {
         const { user_id, username } = payload as {
@@ -265,6 +324,21 @@ export default function ChatRoom({
     await supabase.from("messages").delete().eq("id", id).eq("user_id", currentUserId);
   }
 
+  async function toggleReaction(message: Message, emoji: string) {
+    const supabase = createClient();
+    const existing = message.reactions.find(
+      (r) => r.emoji === emoji && r.user_id === currentUserId
+    );
+
+    if (existing) {
+      await supabase.from("message_reactions").delete().eq("id", existing.id);
+    } else {
+      await supabase
+        .from("message_reactions")
+        .insert({ message_id: message.id, user_id: currentUserId, emoji });
+    }
+  }
+
   async function handleSignOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -310,6 +384,13 @@ export default function ChatRoom({
           const isMine = m.user_id === currentUserId;
           const isEditing = editingId === m.id;
           const wasEdited = m.updated_at !== m.created_at;
+
+          const reactionGroups = new Map<string, Reaction[]>();
+          for (const r of m.reactions) {
+            const group = reactionGroups.get(r.emoji) ?? [];
+            group.push(r);
+            reactionGroups.set(r.emoji, group);
+          }
 
           return (
             <div
@@ -383,6 +464,37 @@ export default function ChatRoom({
                   </div>
                 </div>
               )}
+
+              <div className="flex items-center gap-1 mt-1 flex-wrap">
+                {[...reactionGroups.entries()].map(([emoji, reactors]) => {
+                  const iReacted = reactors.some((r) => r.user_id === currentUserId);
+                  return (
+                    <button
+                      key={emoji}
+                      onClick={() => toggleReaction(m, emoji)}
+                      title={reactors.map((r) => r.username).join(", ")}
+                      className={`text-xs rounded-full px-2 py-0.5 border ${
+                        iReacted
+                          ? "border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-950"
+                          : "border-black/10 dark:border-white/10"
+                      }`}
+                    >
+                      {emoji} {reactors.length}
+                    </button>
+                  );
+                })}
+                <span className="hidden group-hover:flex items-center gap-1">
+                  {REACTION_EMOJIS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      onClick={() => toggleReaction(m, emoji)}
+                      className="text-xs opacity-50 hover:opacity-100"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </span>
+              </div>
             </div>
           );
         })}
