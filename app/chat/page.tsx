@@ -21,7 +21,9 @@ export default async function ChatPage() {
 
   const { data: messages } = await supabase
     .from("messages")
-    .select("id, content, created_at, updated_at, user_id, profiles(username)")
+    .select(
+      "id, content, created_at, updated_at, user_id, profiles(username), message_reactions(id, emoji, user_id, profiles(username))"
+    )
     .order("created_at", { ascending: true })
     .limit(100);
 
@@ -38,6 +40,19 @@ export default async function ChatPage() {
           user_id: m.user_id,
           // Supabase returns the joined row as an object here since it's a to-one relationship
           username: (m.profiles as unknown as { username: string } | null)?.username ?? "משתמש",
+          reactions: (
+            (m.message_reactions ?? []) as unknown as {
+              id: number;
+              emoji: string;
+              user_id: string;
+              profiles: { username: string } | null;
+            }[]
+          ).map((r) => ({
+            id: r.id,
+            emoji: r.emoji,
+            user_id: r.user_id,
+            username: r.profiles?.username ?? "משתמש",
+          })),
         }))
       }
     />
