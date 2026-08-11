@@ -81,3 +81,37 @@ grant select, insert, update, delete on public.messages to authenticated;
 
 -- 4. Turn on Realtime for the messages table.
 alter publication supabase_realtime add table public.messages;
+
+-- 5. Emoji reactions on messages.
+create table if not exists public.message_reactions (
+  id bigint generated always as identity primary key,
+  message_id bigint not null references public.messages (id) on delete cascade,
+  -- References profiles (not auth.users) for the same PostgREST-embedding
+  -- reason as messages.user_id above.
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  emoji text not null,
+  created_at timestamptz not null default now(),
+  unique (message_id, user_id, emoji)
+);
+
+alter table public.message_reactions enable row level security;
+
+create policy "Reactions are viewable by authenticated users"
+  on public.message_reactions for select
+  to authenticated
+  using (true);
+
+create policy "Users can add their own reactions"
+  on public.message_reactions for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+create policy "Users can remove their own reactions"
+  on public.message_reactions for delete
+  to authenticated
+  using (auth.uid() = user_id);
+
+grant select, insert, delete on public.message_reactions to authenticated;
+
+-- 6. Turn on Realtime for reactions too.
+alter publication supabase_realtime add table public.message_reactions;
