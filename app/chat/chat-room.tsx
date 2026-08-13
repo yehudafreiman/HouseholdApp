@@ -54,6 +54,8 @@ export default function ChatRoom({
   // reveals it on desktop, but touch devices have no hover, so tapping the
   // "⋯" button toggles this instead.
   const [activeMessageId, setActiveMessageId] = useState<number | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [onlineUsers, setOnlineUsers] = useState<Map<string, PresenceInfo>>(new Map());
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -395,6 +397,28 @@ export default function ChatRoom({
     .filter(([userId]) => userId !== currentUserId)
     .map(([, info]) => info.username);
 
+  const trimmedQuery = searchQuery.trim();
+  const filteredMessages = trimmedQuery
+    ? messages.filter((m) =>
+        m.content.toLowerCase().includes(trimmedQuery.toLowerCase())
+      )
+    : messages;
+
+  function highlightMatch(text: string) {
+    if (!trimmedQuery) return text;
+    const idx = text.toLowerCase().indexOf(trimmedQuery.toLowerCase());
+    if (idx === -1) return text;
+    return (
+      <>
+        {text.slice(0, idx)}
+        <mark className="bg-yellow-300 dark:bg-yellow-600 dark:text-black rounded px-0.5">
+          {text.slice(idx, idx + trimmedQuery.length)}
+        </mark>
+        {text.slice(idx + trimmedQuery.length)}
+      </>
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
       <header className="flex items-center justify-between border-b border-black/10 dark:border-white/10 px-4 py-3">
@@ -409,16 +433,55 @@ export default function ChatRoom({
             </span>
           )}
         </div>
-        <button
-          onClick={handleSignOut}
-          className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-        >
-          התנתקות
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              setSearchOpen((open) => !open);
+              if (searchOpen) setSearchQuery("");
+            }}
+            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+            aria-label="חיפוש בהודעות"
+          >
+            🔍
+          </button>
+          <button
+            onClick={handleSignOut}
+            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+          >
+            התנתקות
+          </button>
+        </div>
       </header>
 
+      {searchOpen && (
+        <div className="flex items-center gap-2 border-b border-black/10 dark:border-white/10 px-4 py-2">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            autoFocus
+            placeholder="חיפוש בהודעות..."
+            className="flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-1.5 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+          />
+          {trimmedQuery && (
+            <span className="text-xs text-zinc-500 whitespace-nowrap">
+              {filteredMessages.length} תוצאות
+            </span>
+          )}
+          <button
+            onClick={() => {
+              setSearchOpen(false);
+              setSearchQuery("");
+            }}
+            className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
-        {messages.map((m) => {
+        {filteredMessages.map((m) => {
           const isMine = m.user_id === currentUserId;
           const isEditing = editingId === m.id;
           const isActive = activeMessageId === m.id;
@@ -507,7 +570,7 @@ export default function ChatRoom({
                         : "bg-white dark:bg-zinc-900 border border-black/10 dark:border-white/10"
                     }`}
                   >
-                    {m.content}
+                    {highlightMatch(m.content)}
                     {wasEdited && (
                       <span
                         className={`text-[10px] mr-2 ${isMine ? "opacity-70" : "text-zinc-400"}`}
