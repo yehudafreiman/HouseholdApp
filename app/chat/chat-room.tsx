@@ -58,7 +58,10 @@ export default function ChatRoom({
   const [searchQuery, setSearchQuery] = useState("");
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [onlineUsers, setOnlineUsers] = useState<Map<string, PresenceInfo>>(new Map());
+  const [unreadCount, setUnreadCount] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
   const usernameCache = useRef<Map<string, string>>(
     new Map(initialMessages.map((m) => [m.user_id, m.username]))
   );
@@ -75,8 +78,33 @@ export default function ChatRoom({
   }, [currentUserId, currentUsername]);
 
   useEffect(() => {
+    bottomRef.current?.scrollIntoView();
+  }, []);
+
+  // Track whether the user is scrolled near the bottom, in a ref rather
+  // than state — it's only read inside the realtime INSERT handler below
+  // (to decide "auto-scroll" vs "show unread badge"), not during render.
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    function handleScroll() {
+      if (!container) return;
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      const nearBottom = distanceFromBottom < 80;
+      isNearBottomRef.current = nearBottom;
+      if (nearBottom) setUnreadCount(0);
+    }
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  function scrollToBottom() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    setUnreadCount(0);
+  }
 
   useEffect(() => {
     const supabase = createClient();
@@ -102,11 +130,24 @@ export default function ChatRoom({
       const row = payload.new;
       const username = await resolveUsername(row.user_id);
 
-      setMessages((prev) =>
-        prev.some((m) => m.id === row.id)
-          ? prev
-          : [...prev, { ...row, username, reactions: [] }]
-      );
+      let wasAdded = false;
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === row.id)) return prev;
+        wasAdded = true;
+        return [...prev, { ...row, username, reactions: [] }];
+      });
+
+      if (wasAdded) {
+        if (isNearBottomRef.current) {
+          // Wait a tick for the new message to actually render before
+          // scrolling to it.
+          requestAnimationFrame(() =>
+            bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+          );
+        } else {
+          setUnreadCount((c) => c + 1);
+        }
+      }
 
       setTypingUsers((prev) => {
         if (!prev.has(row.user_id)) return prev;
@@ -420,7 +461,7 @@ export default function ChatRoom({
   }
 
   return (
-    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
+    <div className="flex h-dvh flex-col bg-zinc-50 dark:bg-black">
       <header className="flex items-center justify-between border-b border-black/10 dark:border-white/10 px-4 py-3">
         <div className="flex flex-col">
           <span className="text-sm text-zinc-500">
@@ -480,7 +521,10 @@ export default function ChatRoom({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3"
+      >
         {filteredMessages.map((m) => {
           const isMine = m.user_id === currentUserId;
           const isEditing = editingId === m.id;
@@ -628,6 +672,17 @@ export default function ChatRoom({
         })}
         <div ref={bottomRef} />
       </div>
+
+      {unreadCount > 0 && (
+        <div className="flex justify-center pb-1">
+          <button
+            onClick={scrollToBottom}
+            className="rounded-full bg-foreground text-background text-xs px-4 py-1.5 shadow"
+          >
+            ↓ {unreadCount} הודעות חדשות
+          </button>
+        </div>
+      )}
 
       {typingLabel && (
         <div className="px-4 pb-1 text-xs text-zinc-500">{typingLabel}</div>
