@@ -29,6 +29,8 @@ type Reaction = { id: number; emoji: string; user_id: string; username: string }
 
 type Message = MessageRow & { username: string; reactions: Reaction[] };
 
+type PresenceInfo = { username: string; lastRead: number };
+
 const TYPING_TIMEOUT_MS = 3000;
 const TYPING_BROADCAST_INTERVAL_MS = 1500;
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢"];
@@ -49,7 +51,7 @@ export default function ChatRoom({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState("");
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
-  const [onlineUsers, setOnlineUsers] = useState<Map<string, string>>(new Map());
+  const [onlineUsers, setOnlineUsers] = useState<Map<string, PresenceInfo>>(new Map());
   const bottomRef = useRef<HTMLDivElement>(null);
   const usernameCache = useRef<Map<string, string>>(
     new Map(initialMessages.map((m) => [m.user_id, m.username]))
@@ -237,16 +239,21 @@ export default function ChatRoom({
         );
       });
       ch = ch.on("presence", { event: "sync" }, () => {
-        const state = ch.presenceState<{ username: string }>();
-        const next = new Map<string, string>();
+        const state = ch.presenceState<{ username: string; lastRead?: number }>();
+        const next = new Map<string, PresenceInfo>();
         for (const [userId, presences] of Object.entries(state)) {
-          if (presences[0]) next.set(userId, presences[0].username);
+          if (presences[0]) {
+            next.set(userId, {
+              username: presences[0].username,
+              lastRead: presences[0].lastRead ?? 0,
+            });
+          }
         }
         setOnlineUsers(next);
       });
       ch.subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
-          await ch.track({ username: currentUsername });
+          await ch.track({ username: currentUsername, lastRead: 0 });
         }
       });
 
@@ -263,6 +270,18 @@ export default function ChatRoom({
       channelRef.current = null;
     };
   }, [currentUserId, currentUsername]);
+
+  // Mark the latest message as read (via presence) whenever the message
+  // list changes — this doubles as "I'm caught up" since the whole app is
+  // just this chat view. Silently no-ops if the channel isn't joined yet;
+  // it'll catch up on the next message.
+  useEffect(() => {
+    if (messages.length === 0 || !channelRef.current) return;
+    const lastId = messages[messages.length - 1].id;
+    channelRef.current
+      .track({ username: currentUsername, lastRead: lastId })
+      .catch(() => {});
+  }, [messages, currentUsername]);
 
   function notifyTyping() {
     const now = Date.now();
@@ -355,7 +374,7 @@ export default function ChatRoom({
 
   const onlineOthers = [...onlineUsers.entries()]
     .filter(([userId]) => userId !== currentUserId)
-    .map(([, username]) => username);
+    .map(([, info]) => info.username);
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
@@ -391,6 +410,12 @@ export default function ChatRoom({
             group.push(r);
             reactionGroups.set(r.emoji, group);
           }
+
+          const readers = isMine
+            ? [...onlineUsers.entries()]
+                .filter(([userId, info]) => userId !== currentUserId && info.lastRead >= m.id)
+                .map(([, info]) => info.username)
+            : [];
 
           return (
             <div
@@ -495,6 +520,15 @@ export default function ChatRoom({
                   ))}
                 </span>
               </div>
+
+              {readers.length > 0 && (
+                <span
+                  className="text-[10px] text-blue-500 mt-0.5"
+                  title={readers.join(", ")}
+                >
+                  נקרא ✓✓
+                </span>
+              )}
             </div>
           );
         })}
