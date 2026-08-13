@@ -18,10 +18,22 @@ type MessageRow = {
   user_id: string;
 };
 
-type Message = MessageRow & { username: string };
+type ReactionRow = {
+  id: number;
+  message_id: number;
+  user_id: string;
+  emoji: string;
+};
+
+type Reaction = { id: number; emoji: string; user_id: string; username: string };
+
+type Message = MessageRow & { username: string; reactions: Reaction[] };
+
+type PresenceInfo = { username: string; lastRead: number };
 
 const TYPING_TIMEOUT_MS = 3000;
 const TYPING_BROADCAST_INTERVAL_MS = 1500;
+const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢"];
 
 export default function ChatRoom({
   currentUserId,
@@ -38,9 +50,18 @@ export default function ChatRoom({
   const [sending, setSending] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState("");
+  // Which message's action row (edit/delete/react) is expanded — hover
+  // reveals it on desktop, but touch devices have no hover, so tapping the
+  // "⋯" button toggles this instead.
+  const [activeMessageId, setActiveMessageId] = useState<number | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
-  const [onlineUsers, setOnlineUsers] = useState<Map<string, string>>(new Map());
+  const [onlineUsers, setOnlineUsers] = useState<Map<string, PresenceInfo>>(new Map());
+  const [unreadCount, setUnreadCount] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
   const usernameCache = useRef<Map<string, string>>(
     new Map(initialMessages.map((m) => [m.user_id, m.username]))
   );
@@ -57,8 +78,33 @@ export default function ChatRoom({
   }, [currentUserId, currentUsername]);
 
   useEffect(() => {
+    bottomRef.current?.scrollIntoView();
+  }, []);
+
+  // Track whether the user is scrolled near the bottom, in a ref rather
+  // than state — it's only read inside the realtime INSERT handler below
+  // (to decide "auto-scroll" vs "show unread badge"), not during render.
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    function handleScroll() {
+      if (!container) return;
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      const nearBottom = distanceFromBottom < 80;
+      isNearBottomRef.current = nearBottom;
+      if (nearBottom) setUnreadCount(0);
+    }
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  function scrollToBottom() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    setUnreadCount(0);
+  }
 
   useEffect(() => {
     const supabase = createClient();
@@ -84,9 +130,24 @@ export default function ChatRoom({
       const row = payload.new;
       const username = await resolveUsername(row.user_id);
 
-      setMessages((prev) =>
-        prev.some((m) => m.id === row.id) ? prev : [...prev, { ...row, username }]
-      );
+      let wasAdded = false;
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === row.id)) return prev;
+        wasAdded = true;
+        return [...prev, { ...row, username, reactions: [] }];
+      });
+
+      if (wasAdded) {
+        if (isNearBottomRef.current) {
+          // Wait a tick for the new message to actually render before
+          // scrolling to it.
+          requestAnimationFrame(() =>
+            bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+          );
+        } else {
+          setUnreadCount((c) => c + 1);
+        }
+      }
 
       setTypingUsers((prev) => {
         if (!prev.has(row.user_id)) return prev;
@@ -103,7 +164,9 @@ export default function ChatRoom({
       const username = await resolveUsername(row.user_id);
 
       setMessages((prev) =>
-        prev.map((m) => (m.id === row.id ? { ...row, username } : m))
+        prev.map((m) =>
+          m.id === row.id ? { ...row, username, reactions: m.reactions } : m
+        )
       );
     };
 
@@ -111,6 +174,41 @@ export default function ChatRoom({
       const deletedId = payload.old.id;
       if (deletedId === undefined) return;
       setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+    };
+
+    const handleReactionInsert = async (
+      payload: RealtimePostgresInsertPayload<ReactionRow>
+    ) => {
+      const row = payload.new;
+      const username = await resolveUsername(row.user_id);
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === row.message_id && !m.reactions.some((r) => r.id === row.id)
+            ? {
+                ...m,
+                reactions: [
+                  ...m.reactions,
+                  { id: row.id, emoji: row.emoji, user_id: row.user_id, username },
+                ],
+              }
+            : m
+        )
+      );
+    };
+
+    const handleReactionDelete = (
+      payload: RealtimePostgresDeletePayload<ReactionRow>
+    ) => {
+      const deletedId = payload.old.id;
+      if (deletedId === undefined) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.reactions.some((r) => r.id === deletedId)
+            ? { ...m, reactions: m.reactions.filter((r) => r.id !== deletedId) }
+            : m
+        )
+      );
     };
 
     const {
@@ -154,6 +252,16 @@ export default function ChatRoom({
         { event: "DELETE", schema: "public", table: "messages" },
         handleDelete
       );
+      ch = ch.on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "message_reactions" },
+        handleReactionInsert
+      );
+      ch = ch.on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "message_reactions" },
+        handleReactionDelete
+      );
       ch = ch.on("broadcast", { event: "typing" }, ({ payload }) => {
         const { user_id, username } = payload as {
           user_id: string;
@@ -178,16 +286,21 @@ export default function ChatRoom({
         );
       });
       ch = ch.on("presence", { event: "sync" }, () => {
-        const state = ch.presenceState<{ username: string }>();
-        const next = new Map<string, string>();
+        const state = ch.presenceState<{ username: string; lastRead?: number }>();
+        const next = new Map<string, PresenceInfo>();
         for (const [userId, presences] of Object.entries(state)) {
-          if (presences[0]) next.set(userId, presences[0].username);
+          if (presences[0]) {
+            next.set(userId, {
+              username: presences[0].username,
+              lastRead: presences[0].lastRead ?? 0,
+            });
+          }
         }
         setOnlineUsers(next);
       });
       ch.subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
-          await ch.track({ username: currentUsername });
+          await ch.track({ username: currentUsername, lastRead: 0 });
         }
       });
 
@@ -204,6 +317,33 @@ export default function ChatRoom({
       channelRef.current = null;
     };
   }, [currentUserId, currentUsername]);
+
+  // Mark the latest message as read (via presence) whenever the message
+  // list changes — but only while the tab is actually focused. Without the
+  // focus check, "read" would just mean "the browser has the data", not
+  // "someone looked at it" (e.g. a backgrounded tab would still show as
+  // read). Also re-checks on focus/visibility change, since messages can
+  // arrive while backgrounded and should be marked read once you return.
+  useEffect(() => {
+    function markRead() {
+      if (!document.hasFocus() || messages.length === 0 || !channelRef.current) {
+        return;
+      }
+      const lastId = messages[messages.length - 1].id;
+      channelRef.current
+        .track({ username: currentUsername, lastRead: lastId })
+        .catch(() => {});
+    }
+
+    markRead();
+    window.addEventListener("focus", markRead);
+    document.addEventListener("visibilitychange", markRead);
+
+    return () => {
+      window.removeEventListener("focus", markRead);
+      document.removeEventListener("visibilitychange", markRead);
+    };
+  }, [messages, currentUsername]);
 
   function notifyTyping() {
     const now = Date.now();
@@ -265,6 +405,21 @@ export default function ChatRoom({
     await supabase.from("messages").delete().eq("id", id).eq("user_id", currentUserId);
   }
 
+  async function toggleReaction(message: Message, emoji: string) {
+    const supabase = createClient();
+    const existing = message.reactions.find(
+      (r) => r.emoji === emoji && r.user_id === currentUserId
+    );
+
+    if (existing) {
+      await supabase.from("message_reactions").delete().eq("id", existing.id);
+    } else {
+      await supabase
+        .from("message_reactions")
+        .insert({ message_id: message.id, user_id: currentUserId, emoji });
+    }
+  }
+
   async function handleSignOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -281,10 +436,32 @@ export default function ChatRoom({
 
   const onlineOthers = [...onlineUsers.entries()]
     .filter(([userId]) => userId !== currentUserId)
-    .map(([, username]) => username);
+    .map(([, info]) => info.username);
+
+  const trimmedQuery = searchQuery.trim();
+  const filteredMessages = trimmedQuery
+    ? messages.filter((m) =>
+        m.content.toLowerCase().includes(trimmedQuery.toLowerCase())
+      )
+    : messages;
+
+  function highlightMatch(text: string) {
+    if (!trimmedQuery) return text;
+    const idx = text.toLowerCase().indexOf(trimmedQuery.toLowerCase());
+    if (idx === -1) return text;
+    return (
+      <>
+        {text.slice(0, idx)}
+        <mark className="bg-yellow-300 dark:bg-yellow-600 dark:text-black rounded px-0.5">
+          {text.slice(idx, idx + trimmedQuery.length)}
+        </mark>
+        {text.slice(idx + trimmedQuery.length)}
+      </>
+    );
+  }
 
   return (
-    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
+    <div className="flex h-dvh flex-col bg-zinc-50 dark:bg-black">
       <header className="flex items-center justify-between border-b border-black/10 dark:border-white/10 px-4 py-3">
         <div className="flex flex-col">
           <span className="text-sm text-zinc-500">
@@ -297,19 +474,75 @@ export default function ChatRoom({
             </span>
           )}
         </div>
-        <button
-          onClick={handleSignOut}
-          className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-        >
-          התנתקות
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              setSearchOpen((open) => !open);
+              if (searchOpen) setSearchQuery("");
+            }}
+            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+            aria-label="חיפוש בהודעות"
+          >
+            🔍
+          </button>
+          <button
+            onClick={handleSignOut}
+            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+          >
+            התנתקות
+          </button>
+        </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
-        {messages.map((m) => {
+      {searchOpen && (
+        <div className="flex items-center gap-2 border-b border-black/10 dark:border-white/10 px-4 py-2">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            autoFocus
+            placeholder="חיפוש בהודעות..."
+            className="flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-1.5 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+          />
+          {trimmedQuery && (
+            <span className="text-xs text-zinc-500 whitespace-nowrap">
+              {filteredMessages.length} תוצאות
+            </span>
+          )}
+          <button
+            onClick={() => {
+              setSearchOpen(false);
+              setSearchQuery("");
+            }}
+            className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3"
+      >
+        {filteredMessages.map((m) => {
           const isMine = m.user_id === currentUserId;
           const isEditing = editingId === m.id;
+          const isActive = activeMessageId === m.id;
           const wasEdited = m.updated_at !== m.created_at;
+
+          const reactionGroups = new Map<string, Reaction[]>();
+          for (const r of m.reactions) {
+            const group = reactionGroups.get(r.emoji) ?? [];
+            group.push(r);
+            reactionGroups.set(r.emoji, group);
+          }
+
+          const readers = isMine
+            ? [...onlineUsers.entries()]
+                .filter(([userId, info]) => userId !== currentUserId && info.lastRead >= m.id)
+                .map(([, info]) => info.username)
+            : [];
 
           return (
             <div
@@ -350,7 +583,9 @@ export default function ChatRoom({
               ) : (
                 <div className="flex items-center gap-2">
                   {isMine && (
-                    <span className="hidden group-hover:flex items-center gap-2 text-xs text-zinc-500">
+                    <span
+                      className={`${isActive ? "flex" : "hidden group-hover:flex"} items-center gap-2 text-xs text-zinc-500`}
+                    >
                       <button
                         onClick={() => startEdit(m)}
                         className="hover:text-zinc-800 dark:hover:text-zinc-200"
@@ -365,6 +600,13 @@ export default function ChatRoom({
                       </button>
                     </span>
                   )}
+                  <button
+                    onClick={() => setActiveMessageId(isActive ? null : m.id)}
+                    className="text-xs text-zinc-400 opacity-60 hover:opacity-100 px-1"
+                    aria-label="פעולות נוספות"
+                  >
+                    ⋯
+                  </button>
                   <div
                     className={`rounded-2xl px-4 py-2 text-sm ${
                       isMine
@@ -372,7 +614,7 @@ export default function ChatRoom({
                         : "bg-white dark:bg-zinc-900 border border-black/10 dark:border-white/10"
                     }`}
                   >
-                    {m.content}
+                    {highlightMatch(m.content)}
                     {wasEdited && (
                       <span
                         className={`text-[10px] mr-2 ${isMine ? "opacity-70" : "text-zinc-400"}`}
@@ -383,11 +625,64 @@ export default function ChatRoom({
                   </div>
                 </div>
               )}
+
+              <div className="flex items-center gap-1 mt-1 flex-wrap">
+                {[...reactionGroups.entries()].map(([emoji, reactors]) => {
+                  const iReacted = reactors.some((r) => r.user_id === currentUserId);
+                  return (
+                    <button
+                      key={emoji}
+                      onClick={() => toggleReaction(m, emoji)}
+                      title={reactors.map((r) => r.username).join(", ")}
+                      className={`text-xs rounded-full px-2 py-0.5 border ${
+                        iReacted
+                          ? "border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-950"
+                          : "border-black/10 dark:border-white/10"
+                      }`}
+                    >
+                      {emoji} {reactors.length}
+                    </button>
+                  );
+                })}
+                <span
+                  className={`${isActive ? "flex" : "hidden group-hover:flex"} items-center gap-1`}
+                >
+                  {REACTION_EMOJIS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      onClick={() => toggleReaction(m, emoji)}
+                      className="text-xs opacity-50 hover:opacity-100"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </span>
+              </div>
+
+              {readers.length > 0 && (
+                <span
+                  className="text-[10px] text-blue-500 mt-0.5"
+                  title={readers.join(", ")}
+                >
+                  נקרא ✓✓
+                </span>
+              )}
             </div>
           );
         })}
         <div ref={bottomRef} />
       </div>
+
+      {unreadCount > 0 && (
+        <div className="flex justify-center pb-1">
+          <button
+            onClick={scrollToBottom}
+            className="rounded-full bg-foreground text-background text-xs px-4 py-1.5 shadow"
+          >
+            ↓ {unreadCount} הודעות חדשות
+          </button>
+        </div>
+      )}
 
       {typingLabel && (
         <div className="px-4 pb-1 text-xs text-zinc-500">{typingLabel}</div>
