@@ -55,7 +55,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex flex-1 items-center justify-center bg-zinc-50 dark:bg-black px-4">
+    <div className="flex h-dvh items-center justify-center bg-zinc-50 dark:bg-black px-4">
       <div className="w-full max-w-sm rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-950 p-8 shadow-sm">
         <h1 className="text-xl font-semibold text-center mb-6">
           {mode === "login" ? "התחברות" : "הרשמה"}
