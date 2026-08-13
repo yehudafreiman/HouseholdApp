@@ -50,6 +50,10 @@ export default function ChatRoom({
   const [sending, setSending] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState("");
+  // Which message's action row (edit/delete/react) is expanded — hover
+  // reveals it on desktop, but touch devices have no hover, so tapping the
+  // "⋯" button toggles this instead.
+  const [activeMessageId, setActiveMessageId] = useState<number | null>(null);
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [onlineUsers, setOnlineUsers] = useState<Map<string, PresenceInfo>>(new Map());
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -272,15 +276,30 @@ export default function ChatRoom({
   }, [currentUserId, currentUsername]);
 
   // Mark the latest message as read (via presence) whenever the message
-  // list changes — this doubles as "I'm caught up" since the whole app is
-  // just this chat view. Silently no-ops if the channel isn't joined yet;
-  // it'll catch up on the next message.
+  // list changes — but only while the tab is actually focused. Without the
+  // focus check, "read" would just mean "the browser has the data", not
+  // "someone looked at it" (e.g. a backgrounded tab would still show as
+  // read). Also re-checks on focus/visibility change, since messages can
+  // arrive while backgrounded and should be marked read once you return.
   useEffect(() => {
-    if (messages.length === 0 || !channelRef.current) return;
-    const lastId = messages[messages.length - 1].id;
-    channelRef.current
-      .track({ username: currentUsername, lastRead: lastId })
-      .catch(() => {});
+    function markRead() {
+      if (!document.hasFocus() || messages.length === 0 || !channelRef.current) {
+        return;
+      }
+      const lastId = messages[messages.length - 1].id;
+      channelRef.current
+        .track({ username: currentUsername, lastRead: lastId })
+        .catch(() => {});
+    }
+
+    markRead();
+    window.addEventListener("focus", markRead);
+    document.addEventListener("visibilitychange", markRead);
+
+    return () => {
+      window.removeEventListener("focus", markRead);
+      document.removeEventListener("visibilitychange", markRead);
+    };
   }, [messages, currentUsername]);
 
   function notifyTyping() {
@@ -402,6 +421,7 @@ export default function ChatRoom({
         {messages.map((m) => {
           const isMine = m.user_id === currentUserId;
           const isEditing = editingId === m.id;
+          const isActive = activeMessageId === m.id;
           const wasEdited = m.updated_at !== m.created_at;
 
           const reactionGroups = new Map<string, Reaction[]>();
@@ -456,7 +476,9 @@ export default function ChatRoom({
               ) : (
                 <div className="flex items-center gap-2">
                   {isMine && (
-                    <span className="hidden group-hover:flex items-center gap-2 text-xs text-zinc-500">
+                    <span
+                      className={`${isActive ? "flex" : "hidden group-hover:flex"} items-center gap-2 text-xs text-zinc-500`}
+                    >
                       <button
                         onClick={() => startEdit(m)}
                         className="hover:text-zinc-800 dark:hover:text-zinc-200"
@@ -471,6 +493,13 @@ export default function ChatRoom({
                       </button>
                     </span>
                   )}
+                  <button
+                    onClick={() => setActiveMessageId(isActive ? null : m.id)}
+                    className="text-xs text-zinc-400 opacity-60 hover:opacity-100 px-1"
+                    aria-label="פעולות נוספות"
+                  >
+                    ⋯
+                  </button>
                   <div
                     className={`rounded-2xl px-4 py-2 text-sm ${
                       isMine
@@ -508,7 +537,9 @@ export default function ChatRoom({
                     </button>
                   );
                 })}
-                <span className="hidden group-hover:flex items-center gap-1">
+                <span
+                  className={`${isActive ? "flex" : "hidden group-hover:flex"} items-center gap-1`}
+                >
                   {REACTION_EMOJIS.map((emoji) => (
                     <button
                       key={emoji}
