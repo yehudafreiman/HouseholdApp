@@ -476,13 +476,6 @@ export default function ChatRoom({
           )}
         </div>
         <div className="flex items-center gap-3">
-          <Link
-            href="/shopping"
-            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-            aria-label="רשימת קניות"
-          >
-            🛒
-          </Link>
           <button
             onClick={() => {
               setSearchOpen((open) => !open);
@@ -493,6 +486,13 @@ export default function ChatRoom({
           >
             🔍
           </button>
+          <Link
+            href="/shopping"
+            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+            aria-label="רשימת קניות"
+          >
+            🛒
+          </Link>
           <button
             onClick={handleSignOut}
             className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
