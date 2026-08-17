@@ -1,25 +1,25 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { DEFAULT_GROUP_ID } from "@/lib/shopping";
 import ShoppingList from "./shopping-list";
 
 export default async function ShoppingPage() {
-  const supabase = await createClient();
+  const headersList = await headers();
+  const userId = headersList.get("x-user-id");
+  const userEmail = headersList.get("x-user-email");
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  // proxy.ts already verified the session (and redirects unauthenticated
+  // requests to /login before this ever renders) — this is just defense in
+  // depth in case proxy coverage is ever misconfigured.
+  if (!userId) {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("username")
-    .eq("id", user.id)
-    .single();
+  const supabase = await createClient();
 
+  // The all-profiles fetch already includes the current user's own row, so
+  // there's no need for a separate profile-by-id query for the username.
   const [{ data: items }, { data: profiles }] = await Promise.all([
     supabase
       .from("shopping_items")
@@ -38,8 +38,8 @@ export default async function ShoppingPage() {
 
   return (
     <ShoppingList
-      currentUserId={user.id}
-      currentUsername={profile?.username ?? user.email ?? "אני"}
+      currentUserId={userId}
+      currentUsername={profileMap[userId] ?? userEmail ?? "אני"}
       initialItems={items ?? []}
       initialProfiles={profileMap}
     />

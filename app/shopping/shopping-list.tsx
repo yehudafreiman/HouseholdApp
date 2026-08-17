@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
   RealtimeChannel,
@@ -247,13 +248,13 @@ export default function ShoppingList({
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <a
+          <Link
             href="/chat"
             className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
             aria-label="חזרה לצ'אט"
           >
             💬
-          </a>
+          </Link>
           <button
             onClick={handleSignOut}
             className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"

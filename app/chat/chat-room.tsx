@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
   RealtimeChannel,
@@ -475,13 +476,13 @@ export default function ChatRoom({
           )}
         </div>
         <div className="flex items-center gap-3">
-          <a
+          <Link
             href="/shopping"
             className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
             aria-label="רשימת קניות"
           >
             🛒
-          </a>
+          </Link>
           <button
             onClick={() => {
               setSearchOpen((open) => !open);

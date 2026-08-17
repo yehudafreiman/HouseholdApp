@@ -46,5 +46,20 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(new URL("/chat", request.url));
   }
 
-  return supabaseResponse;
+  if (!user) {
+    return supabaseResponse;
+  }
+
+  // Forward the already-verified user via a request header so page.tsx
+  // Server Components can skip a second auth.getUser() round trip to
+  // Supabase for the same request — proxy already did the real check.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-user-id", user.id);
+  if (user.email) requestHeaders.set("x-user-email", user.email);
+
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  for (const cookie of supabaseResponse.cookies.getAll()) {
+    response.cookies.set(cookie);
+  }
+  return response;
 }
