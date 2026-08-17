@@ -1,36 +1,37 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import ChatRoom from "./chat-room";
 
 export default async function ChatPage() {
-  const supabase = await createClient();
+  const headersList = await headers();
+  const userId = headersList.get("x-user-id");
+  const userEmail = headersList.get("x-user-email");
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  // proxy.ts already verified the session (and redirects unauthenticated
+  // requests to /login before this ever renders) — this is just defense in
+  // depth in case proxy coverage is ever misconfigured.
+  if (!userId) {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("username")
-    .eq("id", user.id)
-    .single();
+  const supabase = await createClient();
 
-  const { data: messages } = await supabase
-    .from("messages")
-    .select(
-      "id, content, created_at, updated_at, user_id, profiles(username), message_reactions(id, emoji, user_id, profiles(username))"
-    )
-    .order("created_at", { ascending: true })
-    .limit(100);
+  const [{ data: profile }, { data: messages }] = await Promise.all([
+    supabase.from("profiles").select("username").eq("id", userId).single(),
+    supabase
+      .from("messages")
+      .select(
+        "id, content, created_at, updated_at, user_id, profiles(username), message_reactions(id, emoji, user_id, profiles(username))"
+      )
+      .order("created_at", { ascending: true })
+      .limit(100),
+  ]);
 
   return (
     <ChatRoom
-      currentUserId={user.id}
-      currentUsername={profile?.username ?? user.email ?? "אני"}
+      currentUserId={userId}
+      currentUsername={profile?.username ?? userEmail ?? "אני"}
       initialMessages={
         (messages ?? []).map((m) => ({
           id: m.id,

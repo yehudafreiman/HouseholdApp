@@ -115,3 +115,78 @@ grant select, insert, delete on public.message_reactions to authenticated;
 
 -- 6. Turn on Realtime for reactions too.
 alter publication supabase_realtime add table public.message_reactions;
+
+-- 7. Groups: minimal for now (just enough for shopping_items.group_id to
+-- have a real FK target). A single seeded "default" group stands in for
+-- real group membership/creation, which lands in a later feature. When
+-- that arrives, more rows get added here and a group_members table joins
+-- users to them — shopping_items itself won't need to change.
+create table if not exists public.groups (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  created_at timestamptz not null default now()
+);
+
+insert into public.groups (id, name)
+values ('00000000-0000-0000-0000-000000000001', 'ברירת מחדל')
+on conflict (id) do nothing;
+
+alter table public.groups enable row level security;
+
+create policy "Groups are viewable by authenticated users"
+  on public.groups for select
+  to authenticated
+  using (true);
+
+grant select on public.groups to authenticated;
+
+-- 8. Shopping list items.
+create table if not exists public.shopping_items (
+  id bigint generated always as identity primary key,
+  group_id uuid not null references public.groups (id) on delete cascade
+    default '00000000-0000-0000-0000-000000000001',
+  name text not null check (char_length(trim(name)) > 0),
+  -- Assigned by the app (AI-suggested or manual) from a fixed list of
+  -- categories kept in app code, not enforced here — keeps it easy to add
+  -- new categories without a migration.
+  category text,
+  quantity text,
+  -- Rough estimate only — nothing here claims to be a real, current price.
+  estimated_price numeric(10, 2),
+  is_checked boolean not null default false,
+  added_by uuid not null references public.profiles (id) on delete cascade,
+  checked_by uuid references public.profiles (id) on delete set null,
+  checked_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.shopping_items enable row level security;
+
+create policy "Shopping items are viewable by authenticated users"
+  on public.shopping_items for select
+  to authenticated
+  using (true);
+
+create policy "Authenticated users can add shopping items"
+  on public.shopping_items for insert
+  to authenticated
+  with check (auth.uid() = added_by);
+
+-- Unlike messages, any member can update/delete any item (check things off,
+-- fix quantities, remove duplicates) — it's a shared list, not personal posts.
+create policy "Authenticated users can update shopping items"
+  on public.shopping_items for update
+  to authenticated
+  using (true)
+  with check (true);
+
+create policy "Authenticated users can delete shopping items"
+  on public.shopping_items for delete
+  to authenticated
+  using (true);
+
+grant select, insert, update, delete on public.shopping_items to authenticated;
+
+-- 9. Turn on Realtime for the shopping list too.
+alter publication supabase_realtime add table public.shopping_items;
