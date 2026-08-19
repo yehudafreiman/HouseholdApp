@@ -7,5 +7,5 @@ export default async function Home() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  redirect(user ? "/chat" : "/login");
+  redirect(user ? "/groups" : "/login");
 }

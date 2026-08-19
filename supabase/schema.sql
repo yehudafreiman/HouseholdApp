@@ -43,9 +43,151 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- 3. Messages table.
+-- 3. Groups: a user can belong to several groups at once (e.g. different
+-- families/households), each with its own chat and shopping list. Real
+-- membership lives in group_members below.
+create table if not exists public.groups (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  created_by uuid references public.profiles (id),
+  -- Persistent, owner-regeneratable invite code (not a one-time token —
+  -- for a family-scale app a large-alphabet 8-char code is impractical to
+  -- guess, and the owner can regenerate it any time to kill a leaked one).
+  invite_code text not null,
+  created_at timestamptz not null default now()
+);
+
+-- Seeded row kept only so a migrated database and a fresh install share the
+-- same shape (existing users get enrolled here by add-groups.sql). A fresh
+-- install's first real user goes through the app's create/join flow and
+-- never touches this row.
+insert into public.groups (id, name, invite_code)
+values ('00000000-0000-0000-0000-000000000001', 'ברירת מחדל', 'A1B2C3D4')
+on conflict (id) do nothing;
+
+alter table public.groups enable row level security;
+
+create unique index if not exists groups_invite_code_key on public.groups (invite_code);
+
+-- 4. Group membership.
+create table if not exists public.group_members (
+  group_id  uuid not null references public.groups (id) on delete cascade,
+  user_id   uuid not null references public.profiles (id) on delete cascade,
+  role      text not null default 'member' check (role in ('owner', 'member')),
+  joined_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+
+alter table public.group_members enable row level security;
+
+-- 5. Membership-check helper. security definer lets group_members' own
+-- select policy call this without RLS self-recursion (same trick
+-- handle_new_user() uses above to insert into profiles from a trigger).
+create or replace function public.is_group_member(p_group_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.group_members
+    where group_id = p_group_id and user_id = auth.uid()
+  );
+$$;
+
+grant execute on function public.is_group_member(uuid) to authenticated;
+
+-- 6. Create/join RPCs. A not-yet-member can't select a group by invite code
+-- once groups' select policy is membership-only, so these run as security
+-- definer to look up + insert atomically, without ever loosening that
+-- policy to "everyone can see every group".
+create or replace function public.create_group(p_name text)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_group_id uuid;
+begin
+  insert into public.groups (name, created_by, invite_code)
+  values (p_name, auth.uid(), upper(substr(md5(random()::text || clock_timestamp()::text), 1, 8)))
+  returning id into v_group_id;
+
+  insert into public.group_members (group_id, user_id, role)
+  values (v_group_id, auth.uid(), 'owner');
+
+  return v_group_id;
+end;
+$$;
+
+grant execute on function public.create_group(text) to authenticated;
+
+create or replace function public.join_group_by_code(p_code text)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_group_id uuid;
+begin
+  select id into v_group_id from public.groups where invite_code = upper(p_code);
+  if v_group_id is null then
+    raise exception 'invalid_invite_code';
+  end if;
+
+  insert into public.group_members (group_id, user_id, role)
+  values (v_group_id, auth.uid(), 'member')
+  on conflict (group_id, user_id) do nothing;
+
+  return v_group_id;
+end;
+$$;
+
+grant execute on function public.join_group_by_code(text) to authenticated;
+
+-- 7. groups / group_members RLS.
+create policy "Members can view their groups"
+  on public.groups for select
+  to authenticated
+  using (public.is_group_member(id));
+
+create policy "Owners can update their groups"
+  on public.groups for update
+  to authenticated
+  using (exists (
+    select 1 from public.group_members
+    where group_id = groups.id and user_id = auth.uid() and role = 'owner'
+  ))
+  with check (exists (
+    select 1 from public.group_members
+    where group_id = groups.id and user_id = auth.uid() and role = 'owner'
+  ));
+
+grant select, update on public.groups to authenticated;
+-- No insert grant: groups are only ever created via create_group() above.
+
+create policy "Members can view their groups' membership"
+  on public.group_members for select
+  to authenticated
+  using (public.is_group_member(group_id));
+
+create policy "Users can leave a group"
+  on public.group_members for delete
+  to authenticated
+  using (auth.uid() = user_id);
+
+grant select, delete on public.group_members to authenticated;
+-- No insert grant: membership rows are only ever created via the RPCs
+-- above, which run as security definer and bypass this grant entirely.
+
+-- 8. Messages table.
 create table if not exists public.messages (
   id bigint generated always as identity primary key,
+  group_id uuid not null references public.groups (id) on delete cascade
+    default '00000000-0000-0000-0000-000000000001',
   -- References profiles (not auth.users) so PostgREST can embed
   -- `profiles(username)` in a `select` on this table.
   user_id uuid not null references public.profiles (id) on delete cascade,
@@ -54,35 +196,39 @@ create table if not exists public.messages (
   updated_at timestamptz not null default now()
 );
 
+create index if not exists messages_group_id_created_at_idx on public.messages (group_id, created_at);
+
 alter table public.messages enable row level security;
 
-create policy "Messages are viewable by authenticated users"
+create policy "Members can view their group's messages"
   on public.messages for select
   to authenticated
-  using (true);
+  using (public.is_group_member(group_id));
 
-create policy "Users can insert their own messages"
+create policy "Members can insert their own messages"
   on public.messages for insert
   to authenticated
-  with check (auth.uid() = user_id);
+  with check (auth.uid() = user_id and public.is_group_member(group_id));
 
-create policy "Users can update their own messages"
+create policy "Members can update their own messages"
   on public.messages for update
   to authenticated
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  using (auth.uid() = user_id and public.is_group_member(group_id))
+  with check (auth.uid() = user_id and public.is_group_member(group_id));
 
-create policy "Users can delete their own messages"
+create policy "Members can delete their own messages"
   on public.messages for delete
   to authenticated
-  using (auth.uid() = user_id);
+  using (auth.uid() = user_id and public.is_group_member(group_id));
 
 grant select, insert, update, delete on public.messages to authenticated;
 
--- 4. Turn on Realtime for the messages table.
+-- 9. Turn on Realtime for the messages table.
 alter publication supabase_realtime add table public.messages;
 
--- 5. Emoji reactions on messages.
+-- 10. Emoji reactions on messages. No own group_id column — it's a pure
+-- child row of messages, always dereferenced via message_id, so RLS goes
+-- through a join to the parent message instead of denormalizing group_id.
 create table if not exists public.message_reactions (
   id bigint generated always as identity primary key,
   message_id bigint not null references public.messages (id) on delete cascade,
@@ -96,15 +242,24 @@ create table if not exists public.message_reactions (
 
 alter table public.message_reactions enable row level security;
 
-create policy "Reactions are viewable by authenticated users"
+create policy "Members can view their group's reactions"
   on public.message_reactions for select
   to authenticated
-  using (true);
+  using (exists (
+    select 1 from public.messages m
+    where m.id = message_id and public.is_group_member(m.group_id)
+  ));
 
-create policy "Users can add their own reactions"
+create policy "Members can add their own reactions"
   on public.message_reactions for insert
   to authenticated
-  with check (auth.uid() = user_id);
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from public.messages m
+      where m.id = message_id and public.is_group_member(m.group_id)
+    )
+  );
 
 create policy "Users can remove their own reactions"
   on public.message_reactions for delete
@@ -113,38 +268,13 @@ create policy "Users can remove their own reactions"
 
 grant select, insert, delete on public.message_reactions to authenticated;
 
--- 6. Turn on Realtime for reactions too.
+-- 11. Turn on Realtime for reactions too.
 alter publication supabase_realtime add table public.message_reactions;
 
--- 7. Groups: minimal for now (just enough for shopping_items.group_id to
--- have a real FK target). A single seeded "default" group stands in for
--- real group membership/creation, which lands in a later feature. When
--- that arrives, more rows get added here and a group_members table joins
--- users to them — shopping_items itself won't need to change.
-create table if not exists public.groups (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  created_at timestamptz not null default now()
-);
-
-insert into public.groups (id, name)
-values ('00000000-0000-0000-0000-000000000001', 'ברירת מחדל')
-on conflict (id) do nothing;
-
-alter table public.groups enable row level security;
-
-create policy "Groups are viewable by authenticated users"
-  on public.groups for select
-  to authenticated
-  using (true);
-
-grant select on public.groups to authenticated;
-
--- 8. Shopping list items.
+-- 12. Shopping list items.
 create table if not exists public.shopping_items (
   id bigint generated always as identity primary key,
-  group_id uuid not null references public.groups (id) on delete cascade
-    default '00000000-0000-0000-0000-000000000001',
+  group_id uuid not null references public.groups (id) on delete cascade,
   name text not null check (char_length(trim(name)) > 0),
   -- Assigned by the app (AI-suggested or manual) from a fixed list of
   -- categories kept in app code, not enforced here — keeps it easy to add
@@ -163,30 +293,30 @@ create table if not exists public.shopping_items (
 
 alter table public.shopping_items enable row level security;
 
-create policy "Shopping items are viewable by authenticated users"
+create policy "Members can view their group's shopping items"
   on public.shopping_items for select
   to authenticated
-  using (true);
+  using (public.is_group_member(group_id));
 
-create policy "Authenticated users can add shopping items"
+create policy "Members can add shopping items to their group"
   on public.shopping_items for insert
   to authenticated
-  with check (auth.uid() = added_by);
+  with check (auth.uid() = added_by and public.is_group_member(group_id));
 
 -- Unlike messages, any member can update/delete any item (check things off,
 -- fix quantities, remove duplicates) — it's a shared list, not personal posts.
-create policy "Authenticated users can update shopping items"
+create policy "Members can update their group's shopping items"
   on public.shopping_items for update
   to authenticated
-  using (true)
-  with check (true);
+  using (public.is_group_member(group_id))
+  with check (public.is_group_member(group_id));
 
-create policy "Authenticated users can delete shopping items"
+create policy "Members can delete their group's shopping items"
   on public.shopping_items for delete
   to authenticated
-  using (true);
+  using (public.is_group_member(group_id));
 
 grant select, insert, update, delete on public.shopping_items to authenticated;
 
--- 9. Turn on Realtime for the shopping list too.
+-- 13. Turn on Realtime for the shopping list too.
 alter publication supabase_realtime add table public.shopping_items;
