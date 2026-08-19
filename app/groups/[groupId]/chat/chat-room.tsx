@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import type {
   RealtimeChannel,
   RealtimePostgresInsertPayload,
@@ -10,6 +8,7 @@ import type {
   RealtimePostgresDeletePayload,
 } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import GroupHeader from "@/components/group-header";
 
 type MessageRow = {
   id: number;
@@ -37,15 +36,19 @@ const TYPING_BROADCAST_INTERVAL_MS = 1500;
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢"];
 
 export default function ChatRoom({
+  groupId,
+  groups,
   currentUserId,
   currentUsername,
   initialMessages,
 }: {
+  groupId: string;
+  groupName: string;
+  groups: { id: string; name: string }[];
   currentUserId: string;
   currentUsername: string;
   initialMessages: Message[];
 }) {
-  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
@@ -230,29 +233,53 @@ export default function ChatRoom({
       if (session) await supabase.realtime.setAuth(session.access_token);
       if (cancelled) return;
 
+      // Channel name and presence pool are per-group — presence/broadcast
+      // have no RLS at all, so without a per-group channel name one
+      // group's "typing"/"online" would leak into another group's chat.
+      //
       // Each `.on()` call is assigned separately (rather than chained) —
       // chaining several different event-type overloads back to back
       // confuses TS's overload resolution for this client. `ch` is typed
       // explicitly so each call resolves against the full overload set
       // instead of the previous call's narrowed return type.
-      let ch: RealtimeChannel = supabase.channel("messages-changes", {
+      let ch: RealtimeChannel = supabase.channel(`messages-changes-${groupId}`, {
         config: { presence: { key: currentUserId } },
       });
       ch = ch.on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `group_id=eq.${groupId}`,
+        },
         handleInsert
       );
       ch = ch.on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "messages" },
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `group_id=eq.${groupId}`,
+        },
         handleUpdate
       );
+      // No filter on DELETE: without REPLICA IDENTITY FULL, a delete's
+      // "old" row only carries the primary key, not group_id — a filter
+      // referencing group_id would never match and Realtime would drop
+      // every delete event silently. handleDelete only matches by id
+      // against the current group's already-loaded messages, so an
+      // unfiltered delete from another group is a harmless no-op locally.
       ch = ch.on(
         "postgres_changes",
         { event: "DELETE", schema: "public", table: "messages" },
         handleDelete
       );
+      // message_reactions has no group_id column of its own (it's a pure
+      // child row of messages), so it can't take a filter clause here —
+      // RLS (scoped via a join through messages) is what actually keeps
+      // another group's reactions out.
       ch = ch.on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "message_reactions" },
@@ -317,7 +344,7 @@ export default function ChatRoom({
       if (channel) supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [currentUserId, currentUsername]);
+  }, [groupId, currentUserId, currentUsername]);
 
   // Mark the latest message as read (via presence) whenever the message
   // list changes — but only while the tab is actually focused. Without the
@@ -367,7 +394,7 @@ export default function ChatRoom({
     const supabase = createClient();
     const { error } = await supabase
       .from("messages")
-      .insert({ user_id: currentUserId, content: trimmed });
+      .insert({ user_id: currentUserId, content: trimmed, group_id: groupId });
 
     if (!error) {
       setContent("");
@@ -421,13 +448,6 @@ export default function ChatRoom({
     }
   }
 
-  async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }
-
   const typingLabel =
     typingUsers.size === 0
       ? null
@@ -463,19 +483,11 @@ export default function ChatRoom({
 
   return (
     <div className="flex h-dvh flex-col bg-zinc-50 dark:bg-black">
-      <header className="flex items-center justify-between border-b border-black/10 dark:border-white/10 px-4 py-3">
-        <div className="flex flex-col">
-          <span className="text-sm text-zinc-500">
-            מחובר/ת בתור <span className="font-medium text-foreground">{currentUsername}</span>
-          </span>
-          {onlineOthers.length > 0 && (
-            <span className="flex items-center gap-1 text-xs text-zinc-400 mt-0.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-              {onlineOthers.join(", ")} מחובר/ים כרגע
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
+      <GroupHeader
+        groupId={groupId}
+        groups={groups}
+        activeTab="chat"
+        extraActions={
           <button
             onClick={() => {
               setSearchOpen((open) => !open);
@@ -486,21 +498,21 @@ export default function ChatRoom({
           >
             🔍
           </button>
-          <Link
-            href="/shopping"
-            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-            aria-label="רשימת קניות"
-          >
-            🛒
-          </Link>
-          <button
-            onClick={handleSignOut}
-            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-          >
-            התנתקות
-          </button>
-        </div>
-      </header>
+        }
+        subtitle={
+          <>
+            <span className="text-xs text-zinc-500">
+              מחובר/ת בתור <span className="font-medium text-foreground">{currentUsername}</span>
+            </span>
+            {onlineOthers.length > 0 && (
+              <span className="flex items-center gap-1 text-xs text-zinc-400 mt-0.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                {onlineOthers.join(", ")} מחובר/ים כרגע
+              </span>
+            )}
+          </>
+        }
+      />
 
       {searchOpen && (
         <div className="flex items-center gap-2 border-b border-black/10 dark:border-white/10 px-4 py-2">

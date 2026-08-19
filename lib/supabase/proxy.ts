@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const protectedRoutes = ["/chat", "/shopping"];
+const protectedRoutes = ["/groups", "/join"];
 const authRoutes = ["/login"];
 
 export async function updateSession(request: NextRequest) {
@@ -39,11 +39,13 @@ export async function updateSession(request: NextRequest) {
   const isAuthRoute = authRoutes.some((route) => path.startsWith(route));
 
   if (isProtectedRoute && !user) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", path);
+    return NextResponse.redirect(loginUrl);
   }
 
   if (isAuthRoute && user) {
-    return NextResponse.redirect(new URL("/chat", request.url));
+    return NextResponse.redirect(new URL("/groups", request.url));
   }
 
   if (!user) {

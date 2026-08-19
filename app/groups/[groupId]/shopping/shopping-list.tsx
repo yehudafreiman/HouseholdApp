@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import type {
   RealtimeChannel,
   RealtimePostgresInsertPayload,
@@ -10,7 +8,8 @@ import type {
   RealtimePostgresDeletePayload,
 } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { DEFAULT_GROUP_ID, SHOPPING_CATEGORIES } from "@/lib/shopping";
+import { SHOPPING_CATEGORIES } from "@/lib/shopping";
+import GroupHeader from "@/components/group-header";
 
 type ShoppingItemRow = {
   id: number;
@@ -33,17 +32,20 @@ function sortItems(list: ShoppingItemRow[]) {
 }
 
 export default function ShoppingList({
+  groupId,
+  groups,
   currentUserId,
   currentUsername,
   initialItems,
   initialProfiles,
 }: {
+  groupId: string;
+  groups: { id: string; name: string }[];
   currentUserId: string;
   currentUsername: string;
   initialItems: ShoppingItemRow[];
   initialProfiles: Record<string, string>;
 }) {
-  const router = useRouter();
   const [items, setItems] = useState<ShoppingItemRow[]>(initialItems);
   const [profiles, setProfiles] = useState<Record<string, string>>(initialProfiles);
   const [name, setName] = useState("");
@@ -113,17 +115,35 @@ export default function ShoppingList({
       if (session) await supabase.realtime.setAuth(session.access_token);
       if (cancelled) return;
 
-      let ch: RealtimeChannel = supabase.channel("shopping-items-changes");
+      // Channel name is per-group so switching groups tears down and
+      // rebuilds a fresh subscription scoped to the new group.
+      let ch: RealtimeChannel = supabase.channel(`shopping-items-changes-${groupId}`);
       ch = ch.on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "shopping_items" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "shopping_items",
+          filter: `group_id=eq.${groupId}`,
+        },
         handleInsert
       );
       ch = ch.on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "shopping_items" },
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "shopping_items",
+          filter: `group_id=eq.${groupId}`,
+        },
         handleUpdate
       );
+      // No filter on DELETE: without REPLICA IDENTITY FULL, a delete's
+      // "old" row only carries the primary key, not group_id — a filter
+      // referencing group_id would never match and Realtime would drop
+      // every delete event silently. handleDelete only matches by id
+      // against the current group's already-loaded items, so an
+      // unfiltered delete from another group is a harmless no-op locally.
       ch = ch.on(
         "postgres_changes",
         { event: "DELETE", schema: "public", table: "shopping_items" },
@@ -141,7 +161,7 @@ export default function ShoppingList({
       if (channel) supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, []);
+  }, [groupId]);
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -171,7 +191,7 @@ export default function ShoppingList({
     const trimmedQuantity = quantity.trim();
     const trimmedPrice = price.trim();
     const { error } = await supabase.from("shopping_items").insert({
-      group_id: DEFAULT_GROUP_ID,
+      group_id: groupId,
       name: trimmed,
       category,
       quantity: trimmedQuantity || null,
@@ -211,13 +231,6 @@ export default function ShoppingList({
     await supabase.from("shopping_items").delete().eq("id", id);
   }
 
-  async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }
-
   const grouped = new Map<string, ShoppingItemRow[]>();
   for (const item of items) {
     const cat = item.category ?? "אחר";
@@ -239,30 +252,17 @@ export default function ShoppingList({
 
   return (
     <div className="flex h-dvh flex-col bg-zinc-50 dark:bg-black">
-      <header className="flex items-center justify-between border-b border-black/10 dark:border-white/10 px-4 py-3">
-        <div className="flex flex-col">
-          <span className="text-sm font-medium">רשימת קניות</span>
+      <GroupHeader
+        groupId={groupId}
+        groups={groups}
+        activeTab="shopping"
+        subtitle={
           <span className="text-xs text-zinc-500">
             {uncheckedCount} פריטים לקנייה
             {totalEstimated > 0 && ` · כ-${totalEstimated.toFixed(0)} ₪`}
           </span>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link
-            href="/chat"
-            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-            aria-label="חזרה לצ'אט"
-          >
-            💬
-          </Link>
-          <button
-            onClick={handleSignOut}
-            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-          >
-            התנתקות
-          </button>
-        </div>
-      </header>
+        }
+      />
 
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-5">
         {items.length === 0 && (
