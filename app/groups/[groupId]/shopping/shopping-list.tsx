@@ -52,7 +52,6 @@ export default function ShoppingList({
   const [quantity, setQuantity] = useState("");
   const [price, setPrice] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [categorizing, setCategorizing] = useState(false);
   const fetchingProfiles = useRef<Set<string>>(new Set());
   const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -163,41 +162,54 @@ export default function ShoppingList({
     };
   }, [groupId]);
 
+  // Categorizing calls an LLM and can take a few seconds — waiting on it
+  // before the item even appears would make rapid-fire adding (typing
+  // several items back to back while actually shopping) feel sluggish. The
+  // item goes in immediately as "אחר"; this runs after, in the background,
+  // and updates the row's category once it resolves. Everyone (including
+  // this tab) picks up the change via the existing realtime UPDATE handler.
+  function categorizeInBackground(itemId: number, itemName: string) {
+    fetch("/api/categorize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: itemName }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { category?: string } | null) => {
+        if (!data?.category || data.category === "אחר") return;
+        const supabase = createClient();
+        return supabase
+          .from("shopping_items")
+          .update({ category: data.category })
+          .eq("id", itemId);
+      })
+      .catch(() => {
+        // Background best-effort — the item just stays "אחר".
+      });
+  }
+
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed || submitting) return;
 
     setSubmitting(true);
-    setCategorizing(true);
-
-    let category = "אחר";
-    try {
-      const res = await fetch("/api/categorize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { category?: string };
-        if (data.category) category = data.category;
-      }
-    } catch {
-      // network error — fall back to "אחר"
-    }
-    setCategorizing(false);
 
     const supabase = createClient();
     const trimmedQuantity = quantity.trim();
     const trimmedPrice = price.trim();
-    const { error } = await supabase.from("shopping_items").insert({
-      group_id: groupId,
-      name: trimmed,
-      category,
-      quantity: trimmedQuantity || null,
-      estimated_price: trimmedPrice ? Number(trimmedPrice) : null,
-      added_by: currentUserId,
-    });
+    const { data, error } = await supabase
+      .from("shopping_items")
+      .insert({
+        group_id: groupId,
+        name: trimmed,
+        category: "אחר",
+        quantity: trimmedQuantity || null,
+        estimated_price: trimmedPrice ? Number(trimmedPrice) : null,
+        added_by: currentUserId,
+      })
+      .select("id")
+      .single();
 
     if (!error) {
       setName("");
@@ -205,6 +217,10 @@ export default function ShoppingList({
       setPrice("");
     }
     setSubmitting(false);
+
+    if (!error && data) {
+      categorizeInBackground(data.id, trimmed);
+    }
   }
 
   async function toggleChecked(item: ShoppingItemRow) {
@@ -282,44 +298,54 @@ export default function ShoppingList({
                 return (
                   <div
                     key={item.id}
-                    className={`flex items-center gap-2 rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-900 px-3 py-2 ${
+                    className={`flex items-center gap-1 rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-900 pr-1 pl-3 py-1 ${
                       item.is_checked ? "opacity-50" : ""
                     }`}
                   >
-                    <input
-                      type="checkbox"
-                      checked={item.is_checked}
-                      onChange={() => toggleChecked(item)}
-                      className="h-4 w-4 shrink-0"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span
-                          className={`text-sm ${item.is_checked ? "line-through" : ""}`}
-                        >
-                          {item.name}
-                        </span>
-                        {item.quantity && (
-                          <span className="text-xs text-zinc-400">×{item.quantity}</span>
-                        )}
-                        {item.estimated_price != null && (
-                          <span className="text-xs text-zinc-400">
-                            ~{Number(item.estimated_price).toFixed(0)} ₪
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[10px] text-zinc-400">
-                        {item.is_checked
-                          ? `נקנה ע"י ${checkedByName ?? "משתמש"}`
-                          : `נוסף ע"י ${addedByName}`}
+                    <button
+                      type="button"
+                      onClick={() => toggleChecked(item)}
+                      className="flex flex-1 min-w-0 items-center gap-3 py-2 text-right"
+                    >
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-xs ${
+                          item.is_checked
+                            ? "border-foreground bg-foreground text-background"
+                            : "border-black/20 dark:border-white/25"
+                        }`}
+                        aria-hidden="true"
+                      >
+                        {item.is_checked && "✓"}
                       </span>
-                    </div>
+                      <span className="flex-1 min-w-0">
+                        <span className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`text-sm ${item.is_checked ? "line-through" : ""}`}
+                          >
+                            {item.name}
+                          </span>
+                          {item.quantity && (
+                            <span className="text-xs text-zinc-400">×{item.quantity}</span>
+                          )}
+                          {item.estimated_price != null && (
+                            <span className="text-xs text-zinc-400">
+                              ~{Number(item.estimated_price).toFixed(0)} ₪
+                            </span>
+                          )}
+                        </span>
+                        <span className="block text-[10px] text-zinc-400">
+                          {item.is_checked
+                            ? `נקנה ע"י ${checkedByName ?? "משתמש"}`
+                            : `נוסף ע"י ${addedByName}`}
+                        </span>
+                      </span>
+                    </button>
                     <button
                       onClick={() => handleDeleteItem(item.id)}
-                      className="text-zinc-400 hover:text-red-600 text-sm shrink-0 px-1"
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 text-base"
                       aria-label="מחיקת פריט"
                     >
-                      ✕
+                      🗑
                     </button>
                   </div>
                 );
@@ -346,7 +372,7 @@ export default function ShoppingList({
             disabled={submitting || !name.trim()}
             className="shrink-0 rounded-full bg-foreground text-background px-5 py-2 text-sm font-medium disabled:opacity-50 whitespace-nowrap"
           >
-            {categorizing ? "מקטלג..." : "הוספה"}
+            הוספה
           </button>
         </div>
         <div className="flex items-center gap-2">
