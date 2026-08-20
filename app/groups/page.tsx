@@ -5,13 +5,19 @@ import { createClient } from "@/lib/supabase/server";
 import CreateGroupForm from "./create-group-form";
 import JoinGroupForm from "./join-group-form";
 
-export default async function GroupsPage() {
+export default async function GroupsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ manage?: string }>;
+}) {
   const headersList = await headers();
   const userId = headersList.get("x-user-id");
 
   if (!userId) {
     redirect("/login?next=/groups");
   }
+
+  const { manage } = await searchParams;
 
   const supabase = await createClient();
   const { data: memberships } = await supabase
@@ -23,7 +29,10 @@ export default async function GroupsPage() {
     .map((m) => m.groups as unknown as { id: string; name: string } | null)
     .filter((g): g is { id: string; name: string } => g !== null);
 
-  if (groups.length === 1) {
+  // Auto-redirect straight into the user's one group for convenience on a
+  // plain visit — but ?manage=1 (from the group switcher's "+" link) opts
+  // out, since that's the only way to reach create/join with one group.
+  if (groups.length === 1 && !manage) {
     redirect(`/groups/${groups[0].id}/chat`);
   }
 
