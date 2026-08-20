@@ -16,6 +16,10 @@ type MessageRow = {
   created_at: string;
   updated_at: string;
   user_id: string;
+  attachment_path: string | null;
+  attachment_name: string | null;
+  attachment_type: string | null;
+  attachment_size: number | null;
 };
 
 type ReactionRow = {
@@ -34,6 +38,27 @@ type PresenceInfo = { username: string; lastRead: number };
 const TYPING_TIMEOUT_MS = 3000;
 const TYPING_BROADCAST_INTERVAL_MS = 1500;
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢"];
+const ATTACHMENTS_BUCKET = "chat-attachments";
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileEmoji(mimeType: string) {
+  if (mimeType.startsWith("image/")) return "🖼️";
+  if (mimeType.startsWith("video/")) return "🎥";
+  if (mimeType.startsWith("audio/")) return "🎵";
+  if (mimeType === "application/pdf") return "📄";
+  return "📎";
+}
+
+function sanitizeFilename(name: string) {
+  return name.replace(/[^A-Za-z0-9._-]/g, "_").slice(-100);
+}
 
 export default function ChatRoom({
   groupId,
@@ -63,6 +88,10 @@ export default function ChatRoom({
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [onlineUsers, setOnlineUsers] = useState<Map<string, PresenceInfo>>(new Map());
   const [unreadCount, setUnreadCount] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [signedUrls, setSignedUrls] = useState<Map<string, string>>(new Map());
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -373,6 +402,80 @@ export default function ChatRoom({
     };
   }, [messages, currentUsername]);
 
+  // Attachments live in a private bucket, so displaying/downloading one
+  // needs a signed URL. Resolve only the paths not already cached whenever
+  // the message list changes (initial load or new realtime messages).
+  useEffect(() => {
+    const paths = [
+      ...new Set(
+        messages
+          .map((m) => m.attachment_path)
+          .filter((p): p is string => !!p && !signedUrls.has(p))
+      ),
+    ];
+    if (paths.length === 0) return;
+
+    const supabase = createClient();
+    supabase.storage
+      .from(ATTACHMENTS_BUCKET)
+      .createSignedUrls(paths, SIGNED_URL_TTL_SECONDS)
+      .then(({ data }) => {
+        if (!data) return;
+        setSignedUrls((prev) => {
+          const next = new Map(prev);
+          for (const entry of data) {
+            if (entry.path && entry.signedUrl) next.set(entry.path, entry.signedUrl);
+          }
+          return next;
+        });
+      });
+  }, [messages, signedUrls]);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setUploadError(null);
+
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setUploadError("הקובץ גדול מדי (מקסימום 25MB)");
+      return;
+    }
+
+    setUploading(true);
+    const supabase = createClient();
+    const path = `${groupId}/${currentUserId}/${crypto.randomUUID()}-${sanitizeFilename(file.name)}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from(ATTACHMENTS_BUCKET)
+      .upload(path, file);
+
+    if (uploadErr) {
+      setUploadError("שגיאה בהעלאת הקובץ, נסה/י שוב");
+      setUploading(false);
+      return;
+    }
+
+    const { error: insertErr } = await supabase.from("messages").insert({
+      user_id: currentUserId,
+      content: content.trim(),
+      group_id: groupId,
+      attachment_path: path,
+      attachment_name: file.name,
+      attachment_type: file.type || "application/octet-stream",
+      attachment_size: file.size,
+    });
+
+    if (insertErr) {
+      await supabase.storage.from(ATTACHMENTS_BUCKET).remove([path]);
+      setUploadError("שגיאה בשליחת הקובץ, נסה/י שוב");
+    } else {
+      setContent("");
+    }
+    setUploading(false);
+  }
+
   function notifyTyping() {
     const now = Date.now();
     if (now - lastTypingSentRef.current < TYPING_BROADCAST_INTERVAL_MS) return;
@@ -429,8 +532,17 @@ export default function ChatRoom({
   }
 
   async function handleDeleteMessage(id: number) {
+    const message = messages.find((m) => m.id === id);
     const supabase = createClient();
-    await supabase.from("messages").delete().eq("id", id).eq("user_id", currentUserId);
+    const { error } = await supabase
+      .from("messages")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", currentUserId);
+
+    if (!error && message?.attachment_path) {
+      await supabase.storage.from(ATTACHMENTS_BUCKET).remove([message.attachment_path]);
+    }
   }
 
   async function toggleReaction(message: Message, emoji: string) {
@@ -634,7 +746,46 @@ export default function ChatRoom({
                         : "bg-white dark:bg-zinc-900 border border-black/10 dark:border-white/10"
                     }`}
                   >
-                    {highlightMatch(m.content)}
+                    {m.attachment_path && (
+                      <a
+                        href={signedUrls.get(m.attachment_path) ?? "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`block ${m.content ? "mb-2" : ""}`}
+                      >
+                        {m.attachment_type?.startsWith("image/") ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={signedUrls.get(m.attachment_path)}
+                            alt={m.attachment_name ?? ""}
+                            className="max-h-64 max-w-full rounded-lg object-contain"
+                          />
+                        ) : (
+                          <span
+                            className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${
+                              isMine
+                                ? "border-background/20"
+                                : "border-black/10 dark:border-white/10"
+                            }`}
+                          >
+                            <span>{fileEmoji(m.attachment_type ?? "")}</span>
+                            <span className="flex flex-col">
+                              <span className="text-xs font-medium truncate max-w-[12rem]">
+                                {m.attachment_name}
+                              </span>
+                              {m.attachment_size !== null && (
+                                <span
+                                  className={`text-[10px] ${isMine ? "opacity-70" : "text-zinc-400"}`}
+                                >
+                                  {formatFileSize(m.attachment_size)}
+                                </span>
+                              )}
+                            </span>
+                          </span>
+                        )}
+                      </a>
+                    )}
+                    {m.content && highlightMatch(m.content)}
                     {wasEdited && (
                       <span
                         className={`text-[10px] mr-2 ${isMine ? "opacity-70" : "text-zinc-400"}`}
@@ -708,10 +859,29 @@ export default function ChatRoom({
         <div className="px-4 pb-1 text-xs text-zinc-500">{typingLabel}</div>
       )}
 
+      {uploadError && (
+        <div className="px-4 pb-1 text-xs text-red-600">{uploadError}</div>
+      )}
+
       <form
         onSubmit={handleSend}
         className="flex items-center gap-2 border-t border-black/10 dark:border-white/10 p-3"
       >
+        <input
+          ref={fileInputRef}
+          type="file"
+          onChange={handleFileChange}
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || sending}
+          aria-label="צירוף קובץ"
+          className="shrink-0 text-lg opacity-60 hover:opacity-100 disabled:opacity-30"
+        >
+          📎
+        </button>
         <input
           type="text"
           value={content}
@@ -719,12 +889,13 @@ export default function ChatRoom({
             setContent(e.target.value);
             notifyTyping();
           }}
-          placeholder="הקלד/י הודעה..."
-          className="flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+          placeholder={uploading ? "מעלה קובץ..." : "הקלד/י הודעה..."}
+          disabled={uploading}
+          className="flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20 disabled:opacity-60"
         />
         <button
           type="submit"
-          disabled={sending || !content.trim()}
+          disabled={sending || uploading || !content.trim()}
           className="rounded-full bg-foreground text-background px-5 py-2 text-sm font-medium disabled:opacity-50"
         >
           שליחה

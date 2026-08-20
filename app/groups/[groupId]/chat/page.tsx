@@ -27,7 +27,7 @@ export default async function GroupChatPage({
       supabase
         .from("messages")
         .select(
-          "id, content, created_at, updated_at, user_id, profiles(username), message_reactions(id, emoji, user_id, profiles(username))"
+          "id, content, created_at, updated_at, user_id, attachment_path, attachment_name, attachment_type, attachment_size, profiles(username), message_reactions(id, emoji, user_id, profiles(username))"
         )
         .eq("group_id", groupId)
         .order("created_at", { ascending: true })
@@ -55,6 +55,10 @@ export default async function GroupChatPage({
           created_at: m.created_at,
           updated_at: m.updated_at,
           user_id: m.user_id,
+          attachment_path: m.attachment_path,
+          attachment_name: m.attachment_name,
+          attachment_type: m.attachment_type,
+          attachment_size: m.attachment_size,
           // Supabase returns the joined row as an object here since it's a to-one relationship
           username: (m.profiles as unknown as { username: string } | null)?.username ?? "משתמש",
           reactions: (

@@ -191,9 +191,18 @@ create table if not exists public.messages (
   -- References profiles (not auth.users) so PostgREST can embed
   -- `profiles(username)` in a `select` on this table.
   user_id uuid not null references public.profiles (id) on delete cascade,
-  content text not null check (char_length(trim(content)) > 0),
+  content text not null default '',
+  -- Attachments (all nullable — a message can be text-only, file-only, or
+  -- both). Path convention: {group_id}/{user_id}/{uuid}-{filename}, so
+  -- storage RLS can check membership straight from the object path.
+  attachment_path text,
+  attachment_name text,
+  attachment_type text,
+  attachment_size bigint,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint messages_content_or_attachment_check
+    check (char_length(trim(content)) > 0 or attachment_path is not null)
 );
 
 create index if not exists messages_group_id_created_at_idx on public.messages (group_id, created_at);
@@ -320,3 +329,36 @@ grant select, insert, update, delete on public.shopping_items to authenticated;
 
 -- 13. Turn on Realtime for the shopping list too.
 alter publication supabase_realtime add table public.shopping_items;
+
+-- 14. Chat attachments. Private bucket — accessible only via signed URLs,
+-- gated by the same group-membership rule as everything else. Objects are
+-- keyed as {group_id}/{user_id}/{uuid}-{filename}, so storage.foldername(name)
+-- = ARRAY[group_id, user_id] without a denormalized column on storage.objects.
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('chat-attachments', 'chat-attachments', false, 26214400)
+on conflict (id) do update set file_size_limit = excluded.file_size_limit;
+
+create policy "Group members can view attachments"
+  on storage.objects for select
+  to authenticated
+  using (
+    bucket_id = 'chat-attachments'
+    and public.is_group_member((storage.foldername(name))[1]::uuid)
+  );
+
+create policy "Group members can upload their own attachments"
+  on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'chat-attachments'
+    and public.is_group_member((storage.foldername(name))[1]::uuid)
+    and (storage.foldername(name))[2] = auth.uid()::text
+  );
+
+create policy "Uploaders can delete their own attachments"
+  on storage.objects for delete
+  to authenticated
+  using (
+    bucket_id = 'chat-attachments'
+    and (storage.foldername(name))[2] = auth.uid()::text
+  );
