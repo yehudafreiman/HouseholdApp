@@ -82,12 +82,19 @@ export async function POST(request: Request) {
 
       "7. 'אחר' הוא מוצא אחרון בלבד - שמור אותו למקרים שבהם המוצר באמת " +
         "לא שייך לאף אחת מהקטגוריות באופן עקרוני, לא כברירת מחדל לספק.",
+
+      "8. עקביות בין טעמים/וריאציות של אותו סוג מוצר: אם וריאציה אחת של " +
+        "מוצר משתייכת בבירור לקטגוריה מסוימת, כל שאר הטעמים/הגרסאות של " +
+        "אותו סוג מוצר בדיוק משתייכים לאותה קטגוריה - טעם (וניל, שוקולד, " +
+        "תות, קרמל וכו') לעולם לא משנה את הקטגוריה. למשל: מעדן חלב בכל " +
+        "טעם (וניל, שוקולד, קרמל, קפה) הוא תמיד 'מוצרי חלב, ביצים " +
+        "וגבינות' - זה כולל גם פודינג ומוס. באופן דומה: יוגורט/גלידה/ריבה " +
+        "בכל טעם - אותה קטגוריה תמיד, ללא קשר לטעם הספציפי.",
     ].join("\n\n");
 
     const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5",
+      model: "claude-sonnet-5",
       max_tokens: 200,
-      temperature: 0,
       system: systemPrompt,
       messages: [{ role: "user", content: name }],
       output_config: {
@@ -105,7 +112,10 @@ export async function POST(request: Request) {
       },
     });
 
-    const block = response.content[0];
+    // Sonnet 5 sometimes emits a leading `thinking` block before the actual
+    // `text` response even for a short classification call — content[0]
+    // isn't reliably the answer, so find the text block explicitly.
+    const block = response.content.find((b) => b.type === "text");
     const parsed =
       block?.type === "text" ? (JSON.parse(block.text) as { category?: string }) : null;
     const candidate = parsed?.category;
