@@ -24,6 +24,8 @@ type ShoppingItemRow = {
   created_at: string;
 };
 
+type FrequentItem = { name: string; category: string | null };
+
 function sortItems(list: ShoppingItemRow[]) {
   return [...list].sort((a, b) => {
     if (a.is_checked !== b.is_checked) return a.is_checked ? 1 : -1;
@@ -38,6 +40,7 @@ export default function ShoppingList({
   currentUsername,
   initialItems,
   initialProfiles,
+  frequentItems,
 }: {
   groupId: string;
   groups: { id: string; name: string }[];
@@ -45,6 +48,7 @@ export default function ShoppingList({
   currentUsername: string;
   initialItems: ShoppingItemRow[];
   initialProfiles: Record<string, string>;
+  frequentItems: FrequentItem[];
 }) {
   const [items, setItems] = useState<ShoppingItemRow[]>(initialItems);
   const [profiles, setProfiles] = useState<Record<string, string>>(initialProfiles);
@@ -223,6 +227,19 @@ export default function ShoppingList({
     }
   }
 
+  // Quick-add for a "frequently bought" chip — the category is already
+  // known from purchase history, so this skips the AI call entirely
+  // (faster than a regular add, not just as fast).
+  async function handleQuickAdd(item: FrequentItem) {
+    const supabase = createClient();
+    await supabase.from("shopping_items").insert({
+      group_id: groupId,
+      name: item.name,
+      category: item.category ?? "אחר",
+      added_by: currentUserId,
+    });
+  }
+
   async function toggleChecked(item: ShoppingItemRow) {
     const supabase = createClient();
     if (item.is_checked) {
@@ -239,6 +256,16 @@ export default function ShoppingList({
           checked_at: new Date().toISOString(),
         })
         .eq("id", item.id);
+      // Fire-and-forget: feeds the "frequently bought" quick-add
+      // suggestions on the next page load, doesn't need to block checking
+      // the item off.
+      supabase
+        .rpc("bump_item_stat", {
+          p_group_id: groupId,
+          p_name: item.name,
+          p_category: item.category,
+        })
+        .then(() => {});
     }
   }
 
@@ -273,6 +300,10 @@ export default function ShoppingList({
   const totalEstimated = items
     .filter((i) => !i.is_checked && i.estimated_price != null)
     .reduce((sum, i) => sum + Number(i.estimated_price), 0);
+
+  // Don't suggest something that's already sitting on the active list.
+  const activeNames = new Set(items.filter((i) => !i.is_checked).map((i) => i.name));
+  const suggestions = frequentItems.filter((f) => !activeNames.has(f.name));
 
   return (
     <div className="flex h-dvh flex-col bg-zinc-50 dark:bg-black">
@@ -373,6 +404,22 @@ export default function ShoppingList({
           </div>
         ))}
       </div>
+
+      {suggestions.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto border-t border-black/10 dark:border-white/10 px-3 py-2">
+          <span className="shrink-0 text-[11px] text-zinc-400">קונים לעיתים קרובות:</span>
+          {suggestions.map((s) => (
+            <button
+              key={s.name}
+              type="button"
+              onClick={() => handleQuickAdd(s)}
+              className="shrink-0 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-1 text-xs whitespace-nowrap hover:bg-zinc-50 dark:hover:bg-zinc-800"
+            >
+              + {s.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       <form
         onSubmit={handleAdd}
