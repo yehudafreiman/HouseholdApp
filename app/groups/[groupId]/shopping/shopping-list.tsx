@@ -364,20 +364,20 @@ export default function ShoppingList({
                 return (
                   <div
                     key={item.id}
-                    className={`flex items-center gap-1 rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-900 pr-1 pl-3 py-1 ${
+                    className={`flex items-center gap-2 rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-900 px-3 py-2 ${
                       item.is_checked ? "opacity-50" : ""
                     }`}
                   >
                     <button
                       type="button"
                       onClick={() => toggleChecked(item)}
-                      className="flex flex-1 min-w-0 items-center gap-3 py-2 text-right"
+                      className="flex flex-1 min-w-0 items-center gap-2 py-2 text-right"
                     >
                       <span
-                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-xs ${
+                        className={`flex h-4 w-4 shrink-0 items-center justify-center border text-[10px] ${
                           item.is_checked
                             ? "border-foreground bg-foreground text-background"
-                            : "border-black/20 dark:border-white/25"
+                            : "border-black/30 dark:border-white/30"
                         }`}
                         aria-hidden="true"
                       >
@@ -408,10 +408,10 @@ export default function ShoppingList({
                     </button>
                     <button
                       onClick={() => handleDeleteItem(item.id)}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 text-base"
+                      className="text-zinc-400 hover:text-red-600 text-sm shrink-0 px-1"
                       aria-label="מחיקת פריט"
                     >
-                      🗑
+                      ✕
                     </button>
                   </div>
                 );
