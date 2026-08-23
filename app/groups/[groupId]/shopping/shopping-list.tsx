@@ -247,6 +247,13 @@ export default function ShoppingList({
     await supabase.from("shopping_items").delete().eq("id", id);
   }
 
+  async function handleClearChecked() {
+    const checkedIds = items.filter((i) => i.is_checked).map((i) => i.id);
+    if (checkedIds.length === 0) return;
+    const supabase = createClient();
+    await supabase.from("shopping_items").delete().in("id", checkedIds);
+  }
+
   const grouped = new Map<string, ShoppingItemRow[]>();
   for (const item of items) {
     const cat = item.category ?? "אחר";
@@ -262,6 +269,7 @@ export default function ShoppingList({
   ];
 
   const uncheckedCount = items.filter((i) => !i.is_checked).length;
+  const checkedCount = items.length - uncheckedCount;
   const totalEstimated = items
     .filter((i) => !i.is_checked && i.estimated_price != null)
     .reduce((sum, i) => sum + Number(i.estimated_price), 0);
@@ -273,9 +281,20 @@ export default function ShoppingList({
         groups={groups}
         activeTab="shopping"
         subtitle={
-          <span className="text-xs text-zinc-500">
-            {uncheckedCount} פריטים לקנייה
-            {totalEstimated > 0 && ` · כ-${totalEstimated.toFixed(0)} ₪`}
+          <span className="flex items-center gap-2 text-xs text-zinc-500">
+            <span>
+              {uncheckedCount} פריטים לקנייה
+              {totalEstimated > 0 && ` · כ-${totalEstimated.toFixed(0)} ₪`}
+            </span>
+            {checkedCount > 0 && (
+              <button
+                type="button"
+                onClick={handleClearChecked}
+                className="text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                נקה מסומנים ({checkedCount})
+              </button>
+            )}
           </span>
         }
       />
