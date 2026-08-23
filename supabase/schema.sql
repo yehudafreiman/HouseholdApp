@@ -293,6 +293,9 @@ create table if not exists public.shopping_items (
   -- Rough estimate only — nothing here claims to be a real, current price.
   estimated_price numeric(10, 2),
   is_checked boolean not null default false,
+  -- A wishlist item is a normal row with is_wishlist = true, kept out of
+  -- the active shopping list until moved over ("עברתי לקנייה").
+  is_wishlist boolean not null default false,
   added_by uuid not null references public.profiles (id) on delete cascade,
   checked_by uuid references public.profiles (id) on delete set null,
   checked_at timestamptz,

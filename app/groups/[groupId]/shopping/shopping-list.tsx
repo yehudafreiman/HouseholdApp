@@ -18,6 +18,7 @@ type ShoppingItemRow = {
   quantity: string | null;
   estimated_price: number | null;
   is_checked: boolean;
+  is_wishlist: boolean;
   added_by: string;
   checked_by: string | null;
   checked_at: string | null;
@@ -89,14 +90,29 @@ export default function ShoppingList({
   useEffect(() => {
     const supabase = createClient();
 
+    // Wishlist items live in the same table (is_wishlist = true) and are
+    // excluded from the initial fetch — but Realtime's own `filter` string
+    // already burned this app once (the DELETE-event group_id filter
+    // silently dropped every event), so a second equality clause isn't
+    // trusted here either. Filtering happens client-side instead.
     const handleInsert = (payload: RealtimePostgresInsertPayload<ShoppingItemRow>) => {
       const row = payload.new;
+      if (row.is_wishlist) return;
       setItems((prev) => (prev.some((i) => i.id === row.id) ? prev : [...prev, row]));
     };
 
     const handleUpdate = (payload: RealtimePostgresUpdatePayload<ShoppingItemRow>) => {
       const row = payload.new;
-      setItems((prev) => prev.map((i) => (i.id === row.id ? row : i)));
+      if (row.is_wishlist) {
+        setItems((prev) => prev.filter((i) => i.id !== row.id));
+        return;
+      }
+      // A promoted wishlist item ("עברתי לקנייה") was never in local state,
+      // so this needs to add it, not just map over existing entries.
+      setItems((prev) => {
+        const exists = prev.some((i) => i.id === row.id);
+        return exists ? prev.map((i) => (i.id === row.id ? row : i)) : [...prev, row];
+      });
     };
 
     const handleDelete = (payload: RealtimePostgresDeletePayload<ShoppingItemRow>) => {

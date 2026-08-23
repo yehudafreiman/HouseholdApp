@@ -10,7 +10,7 @@ export default function GroupSwitcher({
 }: {
   groupId: string;
   groups: { id: string; name: string }[];
-  activeTab: "chat" | "shopping";
+  activeTab: "chat" | "shopping" | "wishlist";
 }) {
   const router = useRouter();
 

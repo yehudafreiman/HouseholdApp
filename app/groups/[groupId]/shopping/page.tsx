@@ -28,9 +28,10 @@ export default async function GroupShoppingPage({
       supabase
         .from("shopping_items")
         .select(
-          "id, name, category, quantity, estimated_price, is_checked, added_by, checked_by, checked_at, created_at"
+          "id, name, category, quantity, estimated_price, is_checked, is_wishlist, added_by, checked_by, checked_at, created_at"
         )
         .eq("group_id", groupId)
+        .eq("is_wishlist", false)
         .order("created_at", { ascending: true }),
       supabase.from("profiles").select("id, username"),
       supabase.from("group_members").select("groups(id, name)").eq("user_id", userId),
