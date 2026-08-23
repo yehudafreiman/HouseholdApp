@@ -15,7 +15,7 @@ export default function GroupHeader({
 }: {
   groupId: string;
   groups: { id: string; name: string }[];
-  activeTab: "chat" | "shopping";
+  activeTab: "chat" | "shopping" | "wishlist";
   subtitle?: ReactNode;
   extraActions?: ReactNode;
 }) {
@@ -36,7 +36,16 @@ export default function GroupHeader({
       </div>
       <div className="flex items-center gap-3">
         {extraActions}
-        {activeTab === "chat" ? (
+        {activeTab !== "chat" && (
+          <Link
+            href={`/groups/${groupId}/chat`}
+            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+            aria-label="צ'אט"
+          >
+            💬
+          </Link>
+        )}
+        {activeTab !== "shopping" && (
           <Link
             href={`/groups/${groupId}/shopping`}
             className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
@@ -44,13 +53,14 @@ export default function GroupHeader({
           >
             🛒
           </Link>
-        ) : (
+        )}
+        {activeTab !== "wishlist" && (
           <Link
-            href={`/groups/${groupId}/chat`}
+            href={`/groups/${groupId}/wishlist`}
             className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-            aria-label="חזרה לצ'אט"
+            aria-label="רשימת משאלות"
           >
-            💬
+            ⭐
           </Link>
         )}
         <Link

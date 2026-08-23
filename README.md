@@ -1,12 +1,18 @@
-# Realtime Chat & Shopping List
+# Household App — Groups, Chat & Shopping
 
-A realtime family app built with Next.js (App Router) and Supabase — email/password auth, Postgres-backed chat with Row Level Security and live delivery via Supabase Realtime, plus a shared shopping list with AI-powered item categorization.
+A realtime household-coordination app built with Next.js (App Router) and Supabase — email/password auth, multiple isolated household groups, Postgres-backed chat with Row Level Security and live delivery via Supabase Realtime, and a shared shopping list (plus a non-urgent wishlist) with AI-powered item categorization.
 
 ## Features
 
+**Groups**
+- A user can belong to multiple groups at once (e.g. more than one household) — each group has its own fully isolated chat and shopping list, enforced at the RLS layer, not just the UI
+- Create a group or join one via a shareable invite code (WhatsApp-group style) — no contact picker
+- A group switcher appears once you're in more than one group; with exactly one group you land straight in it, with a `+` link always available to reach the create/join screen
+- Old `/chat` and `/shopping` URLs (from before groups existed) redirect into `/groups`, so existing bookmarks/home-screen shortcuts keep working
+
 **Chat**
-- Email/password sign up & sign in, with route protection
 - Live messaging — new messages appear instantly for everyone, no reload
+- File attachments — any file type, up to 25MB, one per message. Private Supabase Storage bucket, RLS-scoped to group membership; images preview inline, other files show as a download chip
 - Inline message editing and deletion (your own messages only), synced live
 - Emoji reactions (👍❤️😂😮😢), synced live
 - "X is typing…" indicator (Realtime Broadcast, not persisted to the DB)
@@ -17,17 +23,22 @@ A realtime family app built with Next.js (App Router) and Supabase — email/pas
 - Mobile-friendly: tap-to-reveal for edit/delete/reactions (no reliance on hover)
 
 **Shopping list**
-- Shared, realtime-synced shopping list at `/shopping`
-- Adding an item automatically classifies it into one of 18 categories (produce, dairy, meat, disposables, baby products, pet food, health/supplements, etc.) via the Claude API — the list groups by category
+- Shared, realtime-synced list per group
+- Adding an item classifies it into one of 22 categories via the Claude API — the list groups by category. Adding doesn't wait on the AI call: the item appears immediately and re-categorizes in the background once the classification comes back
+- "קונים לעיתים קרובות" — items bought 2+ times show as tap-to-add suggestion chips, using the category already known from history (skips the AI call entirely)
+- Check items off (shows who added / who checked it off); "נקה מסומנים" bulk-clears everything checked in one action
 - Optional quantity and manual estimated price per item
-- Check items off (shows who added / who checked it off), delete items
-- Responsive on mobile — no fixed-width layout breakage
+- Larger touch targets — tapping anywhere on an item row toggles checked; delete is a full-size tappable button, not a small "✕"
+
+**Wishlist**
+- A separate, non-urgent list at `/groups/[groupId]/wishlist` for things spotted in-store that aren't worth interrupting the current trip for
+- "עברתי לקנייה" moves an item into the real shopping list in one action — it keeps whatever category it already resolved to
 
 ## Stack
 
 - [Next.js 16](https://nextjs.org) (App Router, Turbopack)
-- [Supabase](https://supabase.com) — Auth, Postgres, Realtime
-- [Anthropic Claude API](https://platform.claude.com) (`@anthropic-ai/sdk`) — shopping item categorization (Claude Haiku 4.5)
+- [Supabase](https://supabase.com) — Auth, Postgres, Realtime, Storage
+- [Anthropic Claude API](https://platform.claude.com) (`@anthropic-ai/sdk`) — shopping item categorization (`claude-sonnet-5`)
 - [Tailwind CSS](https://tailwindcss.com) v4
 - TypeScript
 
@@ -57,23 +68,24 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ANTHROPIC_API_KEY=your-anthropic-api-key
 ```
 
-`ANTHROPIC_API_KEY` has no `NEXT_PUBLIC_` prefix — it's used only server-side (in `app/api/categorize/route.ts`) and must never be exposed to the browser.
+`ANTHROPIC_API_KEY` has no `NEXT_PUBLIC_` prefix — it's used only server-side (in [`lib/categorize.ts`](lib/categorize.ts), called from [`app/api/categorize/route.ts`](app/api/categorize/route.ts)) and must never be exposed to the browser.
 
 ### 4. Run the database schema
 
-In the Supabase dashboard, open **SQL Editor → New query**, paste the contents of [`supabase/schema.sql`](supabase/schema.sql), and run it.
+In the Supabase dashboard, open **SQL Editor → New query**, paste the contents of [`supabase/schema.sql`](supabase/schema.sql), and run it. This is the full, current schema for a fresh project — it includes everything below in one pass (groups, chat, shopping, wishlist, attachments storage).
 
 This creates:
 
 - `public.profiles` — one row per user, holding a `username`, auto-populated on signup via a trigger
-- `public.messages` — chat messages, with a foreign key to `profiles` (not `auth.users`) so Supabase can embed the sender's username in a single query, plus an `updated_at` column for the "edited" indicator
-- `public.message_reactions` — emoji reactions per message/user
-- `public.groups` — minimal group table (one seeded default group today; the FK is in place so a future per-family-group feature won't need a schema change to `shopping_items`)
-- `public.shopping_items` — name, category, quantity, estimated price, checked state, who added/checked it
+- `public.groups` / `public.group_members` — households a user belongs to, with an owner role and a regeneratable invite code; `is_group_member()` is a `security definer` helper used throughout the RLS policies below to avoid self-recursion
+- `public.messages` / `public.message_reactions` — chat messages (with `attachment_path`/`attachment_name`/`attachment_type`/`attachment_size` for file attachments) and emoji reactions, scoped by `group_id`
+- `public.shopping_items` — name, category, quantity, estimated price, checked state, `is_wishlist` flag, who added/checked it — scoped by `group_id`
+- `public.shopping_item_stats` — purchase-frequency tracking per (group, item name), independent of `shopping_items` rows, feeding the "frequently bought" suggestions
+- The `chat-attachments` Storage bucket (private) plus `storage.objects` RLS policies scoped to group membership via the object path
 - Row Level Security policies on every table, plus table `GRANT`s for the `authenticated` role (RLS alone isn't enough — Postgres also needs base grants)
 - Realtime enabled on `messages`, `message_reactions`, and `shopping_items`
 
-`schema.sql` is the full, current schema for a fresh project. The other files in `supabase/` (`fix-grants.sql`, `fix-messages-fk.sql`, `add-edit-delete.sql`, `add-reactions.sql`, `add-shopping-list.sql`) are one-time, idempotent patches applied during development to an already-running database — not needed for a new setup.
+For an **already-running** database, apply the incremental migrations instead, in order — each is idempotent (safe to re-run): `add-groups.sql` → `add-attachments.sql` → `add-item-stats.sql` → `add-wishlist.sql`. (`fix-grants.sql`, `fix-messages-fk.sql`, `add-edit-delete.sql`, `add-reactions.sql`, `add-shopping-list.sql` are earlier historical patches, already folded into `schema.sql` — not needed for a new setup or if you're already past them.)
 
 ### 5. Run the dev server
 
@@ -81,36 +93,60 @@ This creates:
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). You'll be redirected to `/login` to sign up or sign in, then to `/chat`. Use the 🛒 icon in the chat header to get to `/shopping` (and 💬 to get back).
+Open [http://localhost:3000](http://localhost:3000). You'll be redirected to `/login` to sign up or sign in, then to `/groups` — create a group or join one with an invite code. Inside a group, use the header icons to switch between 💬 chat, 🛒 shopping, ⭐ wishlist, and 🔗 invite.
+
+### 6. Regression-test the categorizer (optional)
+
+```bash
+npm run test:categorize
+```
+
+Runs a curated set of representative/edge-case items against `lib/categorize.ts` directly (no server needed), calling each one twice to catch non-determinism, not just wrong answers — see [`scripts/test-categorization.ts`](scripts/test-categorization.ts). Worth re-running whenever the categorize prompt or model changes.
 
 ## How it works
 
-- **Auth**: `@supabase/ssr` wires Supabase sessions into cookies for both server and client components (`lib/supabase/server.ts`, `lib/supabase/client.ts`).
-- **Route protection**: `proxy.ts` refreshes the session on every request and redirects unauthenticated users away from `/chat` and `/shopping`, and authenticated users away from `/login`. It also forwards the already-verified user id (and email) to Server Components via an `x-user-id` request header, so `page.tsx` files don't need to re-verify the session with a second round trip to Supabase.
-- **Chat UI**: `app/chat/page.tsx` is a server component that loads the current user and message history; `app/chat/chat-room.tsx` is a client component that renders the list, sends/edits/deletes messages, manages reactions/search/unread-badge, and subscribes to Realtime for live updates.
+- **Auth**: `@supabase/ssr` wires Supabase sessions into cookies for both server and client components ([`lib/supabase/server.ts`](lib/supabase/server.ts), [`lib/supabase/client.ts`](lib/supabase/client.ts)).
+- **Route protection**: [`proxy.ts`](proxy.ts) (via [`lib/supabase/proxy.ts`](lib/supabase/proxy.ts)) refreshes the session on every request and redirects unauthenticated users away from `/groups` and `/join`, and authenticated users away from `/login`. It also forwards the already-verified user id (and email) to Server Components via an `x-user-id` request header, so `page.tsx` files don't need to re-verify the session with a second round trip to Supabase.
+- **Groups**: [`app/groups/[groupId]/layout.tsx`](app/groups/[groupId]/layout.tsx) guards every route under a group, redirecting to `/groups` if the user isn't a member. Creating/joining a group goes through `security definer` RPCs (`create_group`, `join_group_by_code`) so a not-yet-member can look up a group by invite code without the `groups` table's select policy ever being loosened to "everyone can see every group."
+- **Chat UI**: `app/groups/[groupId]/chat/page.tsx` is a server component that loads the current user and message history; `chat-room.tsx` is a client component that renders the list, sends/edits/deletes messages, handles attachments, manages reactions/search/unread-badge, and subscribes to Realtime for live updates.
+- **Shopping/wishlist UI**: `app/groups/[groupId]/shopping/{page,shopping-list}.tsx` and `app/groups/[groupId]/wishlist/{page,wishlist}.tsx` follow the same server-loads/client-subscribes split. A wishlist item is a normal `shopping_items` row with `is_wishlist = true` — not a separate table — so "עברתי לקנייה" is a single `UPDATE` instead of a delete+insert.
 - **Realtime auth**: the Supabase Realtime socket needs the user's access token explicitly passed via `supabase.realtime.setAuth()` before subscribing — the browser client doesn't wire this up automatically, and without it, RLS silently rejects incoming realtime events.
-- **Live message sync**: a single channel (`messages-changes`) carries several things at once — `postgres_changes` (INSERT/UPDATE/DELETE) for messages and reactions, `broadcast` for the typing indicator (ephemeral, never written to the DB), and `presence` for who's online and each user's last-read message id (used for read receipts, gated on `document.hasFocus()` so a backgrounded tab doesn't count as "read").
-- **Shopping list UI**: `app/shopping/page.tsx` loads items and all profiles (for display names) in parallel; `app/shopping/shopping-list.tsx` handles add/check/delete and subscribes to Realtime the same way chat does.
-- **AI categorization**: `app/api/categorize/route.ts` is a server-side Route Handler (auth-gated) that calls Claude Haiku 4.5 with `output_config.format` (structured JSON output) constrained to the category list in [`lib/shopping.ts`](lib/shopping.ts). The category names are also spelled out as plain text in the prompt — the JSON schema `enum` alone only constrains the output *format*, it doesn't tell the model what the options actually are, so both are needed for accurate classification.
+- **Realtime filter caution**: Postgres `DELETE` events without `REPLICA IDENTITY FULL` only carry primary-key columns in `payload.old` — a Realtime `filter` referencing any other column (like `group_id`) on a `DELETE` subscription silently matches nothing, dropping every delete event with no error. Every list in this app (messages, shopping items) subscribes to `DELETE` **unfiltered** and matches by id client-side instead. The same caution applies to `is_wishlist`: rather than adding a second equality clause to a Realtime filter string, the shopping list and wishlist filter `is_wishlist` client-side in their `INSERT`/`UPDATE` handlers.
+- **Presence/broadcast have no RLS**: typing indicators and online presence are scoped only by using a channel name unique per group (e.g. `messages-changes-${groupId}`) — there's no database-level protection for these the way `postgres_changes` events get from RLS.
+- **AI categorization**: [`lib/categorize.ts`](lib/categorize.ts) calls Claude (`claude-sonnet-5`) with `output_config.format` (structured JSON output) constrained to the category list in [`lib/shopping.ts`](lib/shopping.ts) — the category names are also spelled out as plain text in the prompt, since the JSON schema `enum` alone only constrains output *format*, not what the model knows the options mean. The route handler ([`app/api/categorize/route.ts`](app/api/categorize/route.ts)) and the test script both call this one implementation. Sonnet 5 sometimes emits a leading `thinking` content block before its answer even for a short classification call — the code finds the `text` block explicitly rather than assuming `response.content[0]` is the answer, which was a real (silent, non-obvious) bug here before.
+- **Attachments**: objects in the `chat-attachments` bucket are keyed `{group_id}/{user_id}/{uuid}-{filename}`, so `storage.foldername(name)` gives Postgres RLS policies the group and uploader without a denormalized column. The bucket is private — display/download goes through short-lived signed URLs.
 
 ## Project structure
 
 ```
 app/
-  login/page.tsx           Sign up / sign in
-  chat/page.tsx              Server component: loads user + message history
-  chat/chat-room.tsx          Client component: messages, reactions, search, realtime
-  shopping/page.tsx            Server component: loads shopping items + profiles
-  shopping/shopping-list.tsx    Client component: add/check/delete items, realtime
-  api/categorize/route.ts        Route Handler: AI item categorization (Claude API)
+  login/page.tsx                      Sign up / sign in
+  groups/page.tsx                       Group picker / create / join
+  groups/create-group-form.tsx
+  groups/join-group-form.tsx
+  groups/[groupId]/layout.tsx           Membership guard for everything below
+  groups/[groupId]/chat/{page,chat-room}.tsx        Chat, incl. attachments
+  groups/[groupId]/shopping/{page,shopping-list}.tsx Shopping list
+  groups/[groupId]/wishlist/{page,wishlist}.tsx      Non-urgent wishlist
+  groups/[groupId]/invite/{page,invite-code-display}.tsx  Invite link, owner-only regenerate
+  join/[code]/{page,join-group-client}.tsx  Auto-join-on-visit flow
+  chat/page.tsx, shopping/page.tsx      Legacy redirect shims -> /groups
+  api/categorize/route.ts               Route Handler: AI item categorization
+components/
+  group-header.tsx                      Shared chat/shopping/wishlist header + nav
+  group-switcher.tsx                    Group dropdown (only shown with 2+ groups)
 lib/
-  shopping.ts                     Category list + default group id (shared client/server)
+  categorize.ts                         Categorize prompt + Claude call (shared with the test script)
+  shopping.ts                           Category list (shared client/server)
   supabase/
-    client.ts                      Browser Supabase client
-    server.ts                       Server Supabase client (Server Components, Route Handlers)
-    proxy.ts                         Session refresh + redirect logic, used by proxy.ts
-proxy.ts                              Next.js Proxy (formerly "Middleware") entry point
+    client.ts                           Browser Supabase client
+    server.ts                           Server Supabase client (Server Components, Route Handlers)
+    proxy.ts                            Session refresh + redirect logic, used by proxy.ts
+proxy.ts                                Next.js Proxy (formerly "Middleware") entry point
+scripts/
+  test-categorization.ts                Regression test for the categorizer (npm run test:categorize)
 supabase/
-  schema.sql                          Full DB schema — run this in a fresh project
-  add-shopping-list.sql                 Idempotent migration for an existing DB
+  schema.sql                            Full DB schema — run this in a fresh project
+  add-groups.sql, add-attachments.sql,
+  add-item-stats.sql, add-wishlist.sql  Idempotent migrations for an existing DB, in order
 ```

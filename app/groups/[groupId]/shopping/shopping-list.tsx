@@ -18,11 +18,14 @@ type ShoppingItemRow = {
   quantity: string | null;
   estimated_price: number | null;
   is_checked: boolean;
+  is_wishlist: boolean;
   added_by: string;
   checked_by: string | null;
   checked_at: string | null;
   created_at: string;
 };
+
+type FrequentItem = { name: string; category: string | null };
 
 function sortItems(list: ShoppingItemRow[]) {
   return [...list].sort((a, b) => {
@@ -38,6 +41,7 @@ export default function ShoppingList({
   currentUsername,
   initialItems,
   initialProfiles,
+  frequentItems,
 }: {
   groupId: string;
   groups: { id: string; name: string }[];
@@ -45,6 +49,7 @@ export default function ShoppingList({
   currentUsername: string;
   initialItems: ShoppingItemRow[];
   initialProfiles: Record<string, string>;
+  frequentItems: FrequentItem[];
 }) {
   const [items, setItems] = useState<ShoppingItemRow[]>(initialItems);
   const [profiles, setProfiles] = useState<Record<string, string>>(initialProfiles);
@@ -85,14 +90,29 @@ export default function ShoppingList({
   useEffect(() => {
     const supabase = createClient();
 
+    // Wishlist items live in the same table (is_wishlist = true) and are
+    // excluded from the initial fetch — but Realtime's own `filter` string
+    // already burned this app once (the DELETE-event group_id filter
+    // silently dropped every event), so a second equality clause isn't
+    // trusted here either. Filtering happens client-side instead.
     const handleInsert = (payload: RealtimePostgresInsertPayload<ShoppingItemRow>) => {
       const row = payload.new;
+      if (row.is_wishlist) return;
       setItems((prev) => (prev.some((i) => i.id === row.id) ? prev : [...prev, row]));
     };
 
     const handleUpdate = (payload: RealtimePostgresUpdatePayload<ShoppingItemRow>) => {
       const row = payload.new;
-      setItems((prev) => prev.map((i) => (i.id === row.id ? row : i)));
+      if (row.is_wishlist) {
+        setItems((prev) => prev.filter((i) => i.id !== row.id));
+        return;
+      }
+      // A promoted wishlist item ("עברתי לקנייה") was never in local state,
+      // so this needs to add it, not just map over existing entries.
+      setItems((prev) => {
+        const exists = prev.some((i) => i.id === row.id);
+        return exists ? prev.map((i) => (i.id === row.id ? row : i)) : [...prev, row];
+      });
     };
 
     const handleDelete = (payload: RealtimePostgresDeletePayload<ShoppingItemRow>) => {
@@ -223,6 +243,19 @@ export default function ShoppingList({
     }
   }
 
+  // Quick-add for a "frequently bought" chip — the category is already
+  // known from purchase history, so this skips the AI call entirely
+  // (faster than a regular add, not just as fast).
+  async function handleQuickAdd(item: FrequentItem) {
+    const supabase = createClient();
+    await supabase.from("shopping_items").insert({
+      group_id: groupId,
+      name: item.name,
+      category: item.category ?? "אחר",
+      added_by: currentUserId,
+    });
+  }
+
   async function toggleChecked(item: ShoppingItemRow) {
     const supabase = createClient();
     if (item.is_checked) {
@@ -239,12 +272,29 @@ export default function ShoppingList({
           checked_at: new Date().toISOString(),
         })
         .eq("id", item.id);
+      // Fire-and-forget: feeds the "frequently bought" quick-add
+      // suggestions on the next page load, doesn't need to block checking
+      // the item off.
+      supabase
+        .rpc("bump_item_stat", {
+          p_group_id: groupId,
+          p_name: item.name,
+          p_category: item.category,
+        })
+        .then(() => {});
     }
   }
 
   async function handleDeleteItem(id: number) {
     const supabase = createClient();
     await supabase.from("shopping_items").delete().eq("id", id);
+  }
+
+  async function handleClearChecked() {
+    const checkedIds = items.filter((i) => i.is_checked).map((i) => i.id);
+    if (checkedIds.length === 0) return;
+    const supabase = createClient();
+    await supabase.from("shopping_items").delete().in("id", checkedIds);
   }
 
   const grouped = new Map<string, ShoppingItemRow[]>();
@@ -262,9 +312,14 @@ export default function ShoppingList({
   ];
 
   const uncheckedCount = items.filter((i) => !i.is_checked).length;
+  const checkedCount = items.length - uncheckedCount;
   const totalEstimated = items
     .filter((i) => !i.is_checked && i.estimated_price != null)
     .reduce((sum, i) => sum + Number(i.estimated_price), 0);
+
+  // Don't suggest something that's already sitting on the active list.
+  const activeNames = new Set(items.filter((i) => !i.is_checked).map((i) => i.name));
+  const suggestions = frequentItems.filter((f) => !activeNames.has(f.name));
 
   return (
     <div className="flex h-dvh flex-col bg-zinc-50 dark:bg-black">
@@ -273,9 +328,20 @@ export default function ShoppingList({
         groups={groups}
         activeTab="shopping"
         subtitle={
-          <span className="text-xs text-zinc-500">
-            {uncheckedCount} פריטים לקנייה
-            {totalEstimated > 0 && ` · כ-${totalEstimated.toFixed(0)} ₪`}
+          <span className="flex items-center gap-2 text-xs text-zinc-500">
+            <span>
+              {uncheckedCount} פריטים לקנייה
+              {totalEstimated > 0 && ` · כ-${totalEstimated.toFixed(0)} ₪`}
+            </span>
+            {checkedCount > 0 && (
+              <button
+                type="button"
+                onClick={handleClearChecked}
+                className="text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                נקה מסומנים ({checkedCount})
+              </button>
+            )}
           </span>
         }
       />
@@ -298,20 +364,20 @@ export default function ShoppingList({
                 return (
                   <div
                     key={item.id}
-                    className={`flex items-center gap-1 rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-900 pr-1 pl-3 py-1 ${
+                    className={`flex items-center gap-2 rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-900 px-3 py-2 ${
                       item.is_checked ? "opacity-50" : ""
                     }`}
                   >
                     <button
                       type="button"
                       onClick={() => toggleChecked(item)}
-                      className="flex flex-1 min-w-0 items-center gap-3 py-2 text-right"
+                      className="flex flex-1 min-w-0 items-center gap-2 py-2 text-right"
                     >
                       <span
-                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-xs ${
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs transition-colors ${
                           item.is_checked
                             ? "border-foreground bg-foreground text-background"
-                            : "border-black/20 dark:border-white/25"
+                            : "border-black/10 dark:border-white/15"
                         }`}
                         aria-hidden="true"
                       >
@@ -342,10 +408,10 @@ export default function ShoppingList({
                     </button>
                     <button
                       onClick={() => handleDeleteItem(item.id)}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 text-base"
+                      className="text-zinc-400 hover:text-red-600 text-sm shrink-0 px-1"
                       aria-label="מחיקת פריט"
                     >
-                      🗑
+                      ✕
                     </button>
                   </div>
                 );
@@ -354,6 +420,22 @@ export default function ShoppingList({
           </div>
         ))}
       </div>
+
+      {suggestions.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto border-t border-black/10 dark:border-white/10 px-3 py-2">
+          <span className="shrink-0 text-[11px] text-zinc-400">קונים לעיתים קרובות:</span>
+          {suggestions.map((s) => (
+            <button
+              key={s.name}
+              type="button"
+              onClick={() => handleQuickAdd(s)}
+              className="shrink-0 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-1 text-xs whitespace-nowrap hover:bg-zinc-50 dark:hover:bg-zinc-800"
+            >
+              + {s.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       <form
         onSubmit={handleAdd}

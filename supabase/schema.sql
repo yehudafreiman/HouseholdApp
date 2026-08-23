@@ -293,6 +293,9 @@ create table if not exists public.shopping_items (
   -- Rough estimate only — nothing here claims to be a real, current price.
   estimated_price numeric(10, 2),
   is_checked boolean not null default false,
+  -- A wishlist item is a normal row with is_wishlist = true, kept out of
+  -- the active shopping list until moved over ("עברתי לקנייה").
+  is_wishlist boolean not null default false,
   added_by uuid not null references public.profiles (id) on delete cascade,
   checked_by uuid references public.profiles (id) on delete set null,
   checked_at timestamptz,
@@ -362,3 +365,50 @@ create policy "Uploaders can delete their own attachments"
     bucket_id = 'chat-attachments'
     and (storage.foldername(name))[2] = auth.uid()::text
   );
+
+-- 15. Purchase-frequency stats, for "frequently bought" quick-add
+-- suggestions. Independent of shopping_items rows so the history survives
+-- an item being checked off and later cleared.
+create table if not exists public.shopping_item_stats (
+  group_id      uuid not null references public.groups (id) on delete cascade,
+  name          text not null,
+  category      text,
+  times_bought  integer not null default 0,
+  last_bought_at timestamptz,
+  primary key (group_id, name)
+);
+
+alter table public.shopping_item_stats enable row level security;
+
+create policy "Members can view their group's item stats"
+  on public.shopping_item_stats for select
+  to authenticated
+  using (public.is_group_member(group_id));
+
+create policy "Members can upsert their group's item stats"
+  on public.shopping_item_stats for insert
+  to authenticated
+  with check (public.is_group_member(group_id));
+
+create policy "Members can update their group's item stats"
+  on public.shopping_item_stats for update
+  to authenticated
+  using (public.is_group_member(group_id))
+  with check (public.is_group_member(group_id));
+
+grant select, insert, update on public.shopping_item_stats to authenticated;
+
+create or replace function public.bump_item_stat(p_group_id uuid, p_name text, p_category text)
+returns void
+language sql
+as $$
+  insert into public.shopping_item_stats (group_id, name, category, times_bought, last_bought_at)
+  values (p_group_id, p_name, p_category, 1, now())
+  on conflict (group_id, name)
+  do update set
+    times_bought = public.shopping_item_stats.times_bought + 1,
+    category = excluded.category,
+    last_bought_at = excluded.last_bought_at;
+$$;
+
+grant execute on function public.bump_item_stat(uuid, text, text) to authenticated;

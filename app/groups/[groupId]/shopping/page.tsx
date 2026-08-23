@@ -23,17 +23,26 @@ export default async function GroupShoppingPage({
 
   // The all-profiles fetch already includes the current user's own row, so
   // there's no need for a separate profile-by-id query for the username.
-  const [{ data: items }, { data: profiles }, { data: memberships }] = await Promise.all([
-    supabase
-      .from("shopping_items")
-      .select(
-        "id, name, category, quantity, estimated_price, is_checked, added_by, checked_by, checked_at, created_at"
-      )
-      .eq("group_id", groupId)
-      .order("created_at", { ascending: true }),
-    supabase.from("profiles").select("id, username"),
-    supabase.from("group_members").select("groups(id, name)").eq("user_id", userId),
-  ]);
+  const [{ data: items }, { data: profiles }, { data: memberships }, { data: stats }] =
+    await Promise.all([
+      supabase
+        .from("shopping_items")
+        .select(
+          "id, name, category, quantity, estimated_price, is_checked, is_wishlist, added_by, checked_by, checked_at, created_at"
+        )
+        .eq("group_id", groupId)
+        .eq("is_wishlist", false)
+        .order("created_at", { ascending: true }),
+      supabase.from("profiles").select("id, username"),
+      supabase.from("group_members").select("groups(id, name)").eq("user_id", userId),
+      supabase
+        .from("shopping_item_stats")
+        .select("name, category")
+        .eq("group_id", groupId)
+        .gte("times_bought", 2)
+        .order("times_bought", { ascending: false })
+        .limit(10),
+    ]);
 
   const profileMap: Record<string, string> = {};
   for (const p of profiles ?? []) {
@@ -53,6 +62,7 @@ export default async function GroupShoppingPage({
       currentUsername={profileMap[userId] ?? userEmail ?? "אני"}
       initialItems={items ?? []}
       initialProfiles={profileMap}
+      frequentItems={stats ?? []}
     />
   );
 }
