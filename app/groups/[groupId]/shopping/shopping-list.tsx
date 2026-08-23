@@ -374,10 +374,10 @@ export default function ShoppingList({
                       className="flex flex-1 min-w-0 items-center gap-2 py-2 text-right"
                     >
                       <span
-                        className={`flex h-4 w-4 shrink-0 items-center justify-center border text-[10px] ${
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs transition-colors ${
                           item.is_checked
                             ? "border-foreground bg-foreground text-background"
-                            : "border-black/30 dark:border-white/30"
+                            : "border-black/10 dark:border-white/15"
                         }`}
                         aria-hidden="true"
                       >
