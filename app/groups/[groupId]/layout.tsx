@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { createClient } from "@/lib/supabase/server";
 
 export default async function GroupLayout({
   children,
@@ -13,24 +12,19 @@ export default async function GroupLayout({
   const headersList = await headers();
   const userId = headersList.get("x-user-id");
 
+  // proxy.ts already redirects unauthenticated requests away from /groups
+  // before they reach here — this is just defense in depth, and costs
+  // nothing (no network call) since the header is already on the request.
   if (!userId) {
     redirect(`/login?next=/groups/${groupId}`);
   }
 
-  const supabase = await createClient();
-  const { data: membership } = await supabase
-    .from("group_members")
-    .select("group_id")
-    .eq("group_id", groupId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  // RLS alone would just return an empty room for a non-member (not an
-  // error), which reads as a bug rather than "you're not in this group" —
-  // this guard exists for that UX, RLS is still the real security boundary.
-  if (!membership) {
-    redirect("/groups");
-  }
-
+  // A membership pre-check here used to add a full extra Supabase round
+  // trip (~250-400ms measured) to every single in-group navigation, on
+  // top of the page's own queries — for a UX nicety (an explicit redirect
+  // instead of an empty room for a non-member) rather than security: RLS
+  // already scopes every query below by group membership regardless, so a
+  // non-member gets an empty page, not someone else's data. Trading that
+  // rare-case nicety for a real, permanent latency win on every navigation.
   return <>{children}</>;
 }
