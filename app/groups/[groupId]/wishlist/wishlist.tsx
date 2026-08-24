@@ -264,10 +264,10 @@ export default function Wishlist({
               </button>
               <button
                 onClick={() => handleDeleteItem(item.id)}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 text-base"
+                className="text-zinc-400 hover:text-red-600 text-sm shrink-0 px-1"
                 aria-label="מחיקת פריט"
               >
-                🗑
+                ✕
               </button>
             </div>
           );

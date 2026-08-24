@@ -41,7 +41,7 @@ export default function ShoppingList({
   currentUsername,
   initialItems,
   initialProfiles,
-  frequentItems,
+  frequentItems: initialFrequentItems,
 }: {
   groupId: string;
   groups: { id: string; name: string }[];
@@ -53,6 +53,7 @@ export default function ShoppingList({
 }) {
   const [items, setItems] = useState<ShoppingItemRow[]>(initialItems);
   const [profiles, setProfiles] = useState<Record<string, string>>(initialProfiles);
+  const [frequentItems, setFrequentItems] = useState<FrequentItem[]>(initialFrequentItems);
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState("");
   const [price, setPrice] = useState("");
@@ -256,6 +257,18 @@ export default function ShoppingList({
     });
   }
 
+  async function handleDismissSuggestion(item: FrequentItem) {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("shopping_item_stats")
+      .delete()
+      .eq("group_id", groupId)
+      .eq("name", item.name);
+    if (!error) {
+      setFrequentItems((prev) => prev.filter((f) => f.name !== item.name));
+    }
+  }
+
   async function toggleChecked(item: ShoppingItemRow) {
     const supabase = createClient();
     if (item.is_checked) {
@@ -425,14 +438,26 @@ export default function ShoppingList({
         <div className="flex items-center gap-2 overflow-x-auto border-t border-black/10 dark:border-white/10 px-3 py-2">
           <span className="shrink-0 text-[11px] text-zinc-400">קונים לעיתים קרובות:</span>
           {suggestions.map((s) => (
-            <button
+            <span
               key={s.name}
-              type="button"
-              onClick={() => handleQuickAdd(s)}
-              className="shrink-0 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-1 text-xs whitespace-nowrap hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              className="shrink-0 flex items-center rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 text-xs whitespace-nowrap"
             >
-              + {s.name}
-            </button>
+              <button
+                type="button"
+                onClick={() => handleQuickAdd(s)}
+                className="px-3 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              >
+                + {s.name}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDismissSuggestion(s)}
+                className="px-2 py-1 text-zinc-400 hover:text-red-600"
+                aria-label={`הסרת ההצעה ${s.name}`}
+              >
+                ✕
+              </button>
+            </span>
           ))}
         </div>
       )}

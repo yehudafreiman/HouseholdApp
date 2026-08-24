@@ -70,6 +70,13 @@ export default function GroupHeader({
         >
           🔗
         </Link>
+        <Link
+          href={`/groups/${groupId}/feedback`}
+          className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+          aria-label="דיווח על בעיה / הצעה לשיפור"
+        >
+          📮
+        </Link>
         <button
           onClick={handleSignOut}
           className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"

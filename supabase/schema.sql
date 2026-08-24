@@ -166,7 +166,15 @@ create policy "Owners can update their groups"
     where group_id = groups.id and user_id = auth.uid() and role = 'owner'
   ));
 
-grant select, update on public.groups to authenticated;
+create policy "Owners can delete their groups"
+  on public.groups for delete
+  to authenticated
+  using (exists (
+    select 1 from public.group_members
+    where group_id = groups.id and user_id = auth.uid() and role = 'owner'
+  ));
+
+grant select, update, delete on public.groups to authenticated;
 -- No insert grant: groups are only ever created via create_group() above.
 
 create policy "Members can view their groups' membership"
@@ -396,7 +404,12 @@ create policy "Members can update their group's item stats"
   using (public.is_group_member(group_id))
   with check (public.is_group_member(group_id));
 
-grant select, insert, update on public.shopping_item_stats to authenticated;
+create policy "Members can delete their group's item stats"
+  on public.shopping_item_stats for delete
+  to authenticated
+  using (public.is_group_member(group_id));
+
+grant select, insert, update, delete on public.shopping_item_stats to authenticated;
 
 create or replace function public.bump_item_stat(p_group_id uuid, p_name text, p_category text)
 returns void
