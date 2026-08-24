@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export default function InviteCodeDisplay({
@@ -15,9 +16,11 @@ export default function InviteCodeDisplay({
   inviteCode: string;
   isOwner: boolean;
 }) {
+  const router = useRouter();
   const [code, setCode] = useState(inviteCode);
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleCopy() {
@@ -45,6 +48,26 @@ export default function InviteCodeDisplay({
     setRegenerating(false);
   }
 
+  async function handleDeleteGroup() {
+    const confirmed = window.confirm(
+      `למחוק את הקבוצה "${groupName}" לצמיתות? כל הצ'אט ורשימת הקניות שלה יימחקו ולא ניתן לשחזר.`
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setError(null);
+    const supabase = createClient();
+    const { error } = await supabase.from("groups").delete().eq("id", groupId);
+
+    if (error) {
+      setError("שגיאה במחיקת הקבוצה, נסה/י שוב");
+      setDeleting(false);
+    } else {
+      router.push("/groups");
+      router.refresh();
+    }
+  }
+
   return (
     <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-zinc-50 dark:bg-black px-4">
       <h1 className="text-lg font-semibold">הזמנה ל{groupName}</h1>
@@ -67,6 +90,15 @@ export default function InviteCodeDisplay({
           className="text-xs text-zinc-500 underline disabled:opacity-50"
         >
           יצירת קוד חדש (מבטל את הקוד הישן)
+        </button>
+      )}
+      {isOwner && (
+        <button
+          onClick={handleDeleteGroup}
+          disabled={deleting}
+          className="text-xs text-red-600 underline disabled:opacity-50"
+        >
+          מחיקת הקבוצה לצמיתות
         </button>
       )}
       {error && <p className="text-sm text-red-600">{error}</p>}
