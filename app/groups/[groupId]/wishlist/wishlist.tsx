@@ -283,8 +283,23 @@ export default function Wishlist({
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="הוספה לרשימת המשאלות... (למשל: פודינג חדש)"
+            placeholder="הוספה לרשימת המשאלות..."
             className="min-w-0 flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+          />
+          <input
+            type="text"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            placeholder="כמות"
+            className="w-16 min-w-0 shrink-0 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+          />
+          <input
+            type="number"
+            inputMode="decimal"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            placeholder="₪"
+            className="w-14 min-w-0 shrink-0 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
           />
           <button
             type="submit"
@@ -293,23 +308,6 @@ export default function Wishlist({
           >
             הוספה
           </button>
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            placeholder="כמות (אופציונלי)"
-            className="min-w-0 flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
-          />
-          <input
-            type="number"
-            inputMode="decimal"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="מחיר ₪ (אופציונלי)"
-            className="min-w-0 flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
-          />
         </div>
         <span className="text-[11px] text-zinc-500 px-2">
           מחובר/ת בתור {currentUsername}
