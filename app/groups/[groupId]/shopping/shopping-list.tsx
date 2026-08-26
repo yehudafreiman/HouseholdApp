@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   RealtimeChannel,
   RealtimePostgresInsertPayload,
@@ -9,6 +10,7 @@ import type {
 } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { SHOPPING_CATEGORIES } from "@/lib/shopping";
+import { useGroupMeta } from "@/lib/hooks/use-group-meta";
 import GroupHeader from "@/components/group-header";
 
 type ShoppingItemRow = {
@@ -27,6 +29,9 @@ type ShoppingItemRow = {
 
 type FrequentItem = { name: string; category: string | null };
 
+const ITEMS_KEY = (groupId: string) => ["shopping-items", groupId] as const;
+const STATS_KEY = (groupId: string) => ["shopping-stats", groupId] as const;
+
 function sortItems(list: ShoppingItemRow[]) {
   return [...list].sort((a, b) => {
     if (a.is_checked !== b.is_checked) return a.is_checked ? 1 : -1;
@@ -34,92 +39,109 @@ function sortItems(list: ShoppingItemRow[]) {
   });
 }
 
+async function fetchItems(groupId: string): Promise<ShoppingItemRow[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("shopping_items")
+    .select(
+      "id, name, category, quantity, estimated_price, is_checked, is_wishlist, added_by, checked_by, checked_at, created_at"
+    )
+    .eq("group_id", groupId)
+    .eq("is_wishlist", false)
+    .order("created_at", { ascending: true });
+  return data ?? [];
+}
+
+async function fetchStats(groupId: string): Promise<FrequentItem[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("shopping_item_stats")
+    .select("name, category")
+    .eq("group_id", groupId)
+    .gte("times_bought", 2)
+    .order("times_bought", { ascending: false })
+    .limit(10);
+  return data ?? [];
+}
+
 export default function ShoppingList({
   groupId,
-  groups,
   currentUserId,
-  currentUsername,
-  initialItems,
-  initialProfiles,
-  frequentItems: initialFrequentItems,
+  currentUserEmail,
 }: {
   groupId: string;
-  groups: { id: string; name: string }[];
   currentUserId: string;
-  currentUsername: string;
-  initialItems: ShoppingItemRow[];
-  initialProfiles: Record<string, string>;
-  frequentItems: FrequentItem[];
+  currentUserEmail: string | null;
 }) {
-  const [items, setItems] = useState<ShoppingItemRow[]>(initialItems);
-  const [profiles, setProfiles] = useState<Record<string, string>>(initialProfiles);
-  const [frequentItems, setFrequentItems] = useState<FrequentItem[]>(initialFrequentItems);
+  const queryClient = useQueryClient();
+  const channelRef = useRef<RealtimeChannel | null>(null);
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState("");
   const [price, setPrice] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const fetchingProfiles = useRef<Set<string>>(new Set());
-  const channelRef = useRef<RealtimeChannel | null>(null);
 
-  // Resolve any added_by/checked_by user IDs we don't have a username for
-  // yet (e.g. a new item from someone who joined after the initial load).
+  const { data: meta } = useGroupMeta(currentUserId, currentUserEmail);
+  const groups = meta?.groups ?? [];
+  const profileMap = useMemo(() => meta?.profileMap ?? {}, [meta]);
+  const currentUsername = meta?.currentUsername ?? currentUserEmail ?? "אני";
+
+  const { data: itemsData } = useQuery({
+    queryKey: ITEMS_KEY(groupId),
+    queryFn: () => fetchItems(groupId),
+  });
+  const items = useMemo(() => itemsData ?? [], [itemsData]);
+
+  const { data: statsData } = useQuery({
+    queryKey: STATS_KEY(groupId),
+    queryFn: () => fetchStats(groupId),
+  });
+  const frequentItems = statsData ?? [];
+
+  // If an item references a user we don't have a username for yet (e.g.
+  // someone joined mid-session after group-meta was cached), refresh it.
   useEffect(() => {
-    const missingIds = new Set<string>();
-    for (const item of items) {
-      if (!profiles[item.added_by]) missingIds.add(item.added_by);
-      if (item.checked_by && !profiles[item.checked_by]) missingIds.add(item.checked_by);
+    const missing = items.some(
+      (item) => !profileMap[item.added_by] || (item.checked_by && !profileMap[item.checked_by])
+    );
+    if (missing) {
+      queryClient.invalidateQueries({ queryKey: ["group-meta", currentUserId] });
     }
-    const idsToFetch = [...missingIds].filter((id) => !fetchingProfiles.current.has(id));
-    if (idsToFetch.length === 0) return;
-    idsToFetch.forEach((id) => fetchingProfiles.current.add(id));
-
-    const supabase = createClient();
-    supabase
-      .from("profiles")
-      .select("id, username")
-      .in("id", idsToFetch)
-      .then(({ data }) => {
-        if (!data) return;
-        setProfiles((prev) => {
-          const next = { ...prev };
-          for (const p of data) next[p.id] = p.username;
-          return next;
-        });
-      });
-  }, [items, profiles]);
+  }, [items, profileMap, currentUserId, queryClient]);
 
   useEffect(() => {
     const supabase = createClient();
 
     // Wishlist items live in the same table (is_wishlist = true) and are
-    // excluded from the initial fetch — but Realtime's own `filter` string
-    // already burned this app once (the DELETE-event group_id filter
-    // silently dropped every event), so a second equality clause isn't
-    // trusted here either. Filtering happens client-side instead.
+    // excluded from the fetch — but Realtime's own `filter` string already
+    // burned this app once (the DELETE-event group_id filter silently
+    // dropped every event), so a second equality clause isn't trusted here
+    // either. Filtering happens client-side instead.
     const handleInsert = (payload: RealtimePostgresInsertPayload<ShoppingItemRow>) => {
       const row = payload.new;
       if (row.is_wishlist) return;
-      setItems((prev) => (prev.some((i) => i.id === row.id) ? prev : [...prev, row]));
+      queryClient.setQueryData<ShoppingItemRow[]>(ITEMS_KEY(groupId), (prev) =>
+        (prev ?? []).some((i) => i.id === row.id) ? (prev ?? []) : [...(prev ?? []), row]
+      );
     };
 
     const handleUpdate = (payload: RealtimePostgresUpdatePayload<ShoppingItemRow>) => {
       const row = payload.new;
-      if (row.is_wishlist) {
-        setItems((prev) => prev.filter((i) => i.id !== row.id));
-        return;
-      }
-      // A promoted wishlist item ("עברתי לקנייה") was never in local state,
-      // so this needs to add it, not just map over existing entries.
-      setItems((prev) => {
-        const exists = prev.some((i) => i.id === row.id);
-        return exists ? prev.map((i) => (i.id === row.id ? row : i)) : [...prev, row];
+      queryClient.setQueryData<ShoppingItemRow[]>(ITEMS_KEY(groupId), (prev) => {
+        const list = prev ?? [];
+        if (row.is_wishlist) return list.filter((i) => i.id !== row.id);
+        // A promoted wishlist item ("עברתי לקנייה") was never in the cache,
+        // so this needs to add it, not just map over existing entries.
+        const exists = list.some((i) => i.id === row.id);
+        return exists ? list.map((i) => (i.id === row.id ? row : i)) : [...list, row];
       });
     };
 
     const handleDelete = (payload: RealtimePostgresDeletePayload<ShoppingItemRow>) => {
       const deletedId = payload.old.id;
       if (deletedId === undefined) return;
-      setItems((prev) => prev.filter((i) => i.id !== deletedId));
+      queryClient.setQueryData<ShoppingItemRow[]>(ITEMS_KEY(groupId), (prev) =>
+        (prev ?? []).filter((i) => i.id !== deletedId)
+      );
     };
 
     const {
@@ -181,7 +203,7 @@ export default function ShoppingList({
       if (channel) supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [groupId]);
+  }, [groupId, queryClient]);
 
   // Categorizing calls an LLM and can take a few seconds — waiting on it
   // before the item even appears would make rapid-fire adding (typing
@@ -265,7 +287,9 @@ export default function ShoppingList({
       .eq("group_id", groupId)
       .eq("name", item.name);
     if (!error) {
-      setFrequentItems((prev) => prev.filter((f) => f.name !== item.name));
+      queryClient.setQueryData<FrequentItem[]>(STATS_KEY(groupId), (prev) =>
+        (prev ?? []).filter((f) => f.name !== item.name)
+      );
     }
   }
 
@@ -371,8 +395,8 @@ export default function ShoppingList({
             <h2 className="text-xs font-semibold text-zinc-500">{category}</h2>
             <div className="flex flex-col gap-1">
               {sortItems(grouped.get(category) ?? []).map((item) => {
-                const addedByName = profiles[item.added_by] ?? "משתמש";
-                const checkedByName = item.checked_by ? profiles[item.checked_by] : null;
+                const addedByName = profileMap[item.added_by] ?? "משתמש";
+                const checkedByName = item.checked_by ? profileMap[item.checked_by] : null;
 
                 return (
                   <div

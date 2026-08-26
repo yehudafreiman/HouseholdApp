@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   RealtimeChannel,
   RealtimePostgresInsertPayload,
@@ -8,6 +9,7 @@ import type {
   RealtimePostgresDeletePayload,
 } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { useGroupMeta } from "@/lib/hooks/use-group-meta";
 import GroupHeader from "@/components/group-header";
 
 type WishlistItemRow = {
@@ -21,52 +23,51 @@ type WishlistItemRow = {
   created_at: string;
 };
 
+const ITEMS_KEY = (groupId: string) => ["wishlist-items", groupId] as const;
+
+async function fetchItems(groupId: string): Promise<WishlistItemRow[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("shopping_items")
+    .select("id, name, category, quantity, estimated_price, is_wishlist, added_by, created_at")
+    .eq("group_id", groupId)
+    .eq("is_wishlist", true)
+    .order("created_at", { ascending: true });
+  return data ?? [];
+}
+
 export default function Wishlist({
   groupId,
-  groups,
   currentUserId,
-  currentUsername,
-  initialItems,
-  initialProfiles,
+  currentUserEmail,
 }: {
   groupId: string;
-  groups: { id: string; name: string }[];
   currentUserId: string;
-  currentUsername: string;
-  initialItems: WishlistItemRow[];
-  initialProfiles: Record<string, string>;
+  currentUserEmail: string | null;
 }) {
-  const [items, setItems] = useState<WishlistItemRow[]>(initialItems);
-  const [profiles, setProfiles] = useState<Record<string, string>>(initialProfiles);
+  const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState("");
   const [price, setPrice] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const fetchingProfiles = useRef<Set<string>>(new Set());
+
+  const { data: meta } = useGroupMeta(currentUserId, currentUserEmail);
+  const groups = meta?.groups ?? [];
+  const profileMap = useMemo(() => meta?.profileMap ?? {}, [meta]);
+  const currentUsername = meta?.currentUsername ?? currentUserEmail ?? "אני";
+
+  const { data: itemsData } = useQuery({
+    queryKey: ITEMS_KEY(groupId),
+    queryFn: () => fetchItems(groupId),
+  });
+  const items = useMemo(() => itemsData ?? [], [itemsData]);
 
   useEffect(() => {
-    const missingIds = new Set<string>();
-    for (const item of items) {
-      if (!profiles[item.added_by]) missingIds.add(item.added_by);
+    const missing = items.some((item) => !profileMap[item.added_by]);
+    if (missing) {
+      queryClient.invalidateQueries({ queryKey: ["group-meta", currentUserId] });
     }
-    const idsToFetch = [...missingIds].filter((id) => !fetchingProfiles.current.has(id));
-    if (idsToFetch.length === 0) return;
-    idsToFetch.forEach((id) => fetchingProfiles.current.add(id));
-
-    const supabase = createClient();
-    supabase
-      .from("profiles")
-      .select("id, username")
-      .in("id", idsToFetch)
-      .then(({ data }) => {
-        if (!data) return;
-        setProfiles((prev) => {
-          const next = { ...prev };
-          for (const p of data) next[p.id] = p.username;
-          return next;
-        });
-      });
-  }, [items, profiles]);
+  }, [items, profileMap, currentUserId, queryClient]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -77,23 +78,29 @@ export default function Wishlist({
     const handleInsert = (payload: RealtimePostgresInsertPayload<WishlistItemRow>) => {
       const row = payload.new;
       if (!row.is_wishlist) return;
-      setItems((prev) => (prev.some((i) => i.id === row.id) ? prev : [...prev, row]));
+      queryClient.setQueryData<WishlistItemRow[]>(ITEMS_KEY(groupId), (prev) =>
+        (prev ?? []).some((i) => i.id === row.id) ? (prev ?? []) : [...(prev ?? []), row]
+      );
     };
 
     const handleUpdate = (payload: RealtimePostgresUpdatePayload<WishlistItemRow>) => {
       const row = payload.new;
-      if (!row.is_wishlist) {
-        // Moved to the shopping list — no longer belongs here.
-        setItems((prev) => prev.filter((i) => i.id !== row.id));
-        return;
-      }
-      setItems((prev) => prev.map((i) => (i.id === row.id ? row : i)));
+      queryClient.setQueryData<WishlistItemRow[]>(ITEMS_KEY(groupId), (prev) => {
+        const list = prev ?? [];
+        if (!row.is_wishlist) {
+          // Moved to the shopping list — no longer belongs here.
+          return list.filter((i) => i.id !== row.id);
+        }
+        return list.map((i) => (i.id === row.id ? row : i));
+      });
     };
 
     const handleDelete = (payload: RealtimePostgresDeletePayload<WishlistItemRow>) => {
       const deletedId = payload.old.id;
       if (deletedId === undefined) return;
-      setItems((prev) => prev.filter((i) => i.id !== deletedId));
+      queryClient.setQueryData<WishlistItemRow[]>(ITEMS_KEY(groupId), (prev) =>
+        (prev ?? []).filter((i) => i.id !== deletedId)
+      );
     };
 
     const {
@@ -149,7 +156,7 @@ export default function Wishlist({
       subscription.unsubscribe();
       if (channel) supabase.removeChannel(channel);
     };
-  }, [groupId]);
+  }, [groupId, queryClient]);
 
   function categorizeInBackground(itemId: number, itemName: string) {
     fetch("/api/categorize", {
@@ -236,7 +243,7 @@ export default function Wishlist({
         )}
 
         {items.map((item) => {
-          const addedByName = profiles[item.added_by] ?? "משתמש";
+          const addedByName = profileMap[item.added_by] ?? "משתמש";
           return (
             <div
               key={item.id}

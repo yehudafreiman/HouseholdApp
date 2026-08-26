@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { createClient } from "@/lib/supabase/server";
 import ShoppingList from "./shopping-list";
 
 export default async function GroupShoppingPage({
@@ -19,50 +18,17 @@ export default async function GroupShoppingPage({
     redirect(`/login?next=/groups/${groupId}/shopping`);
   }
 
-  const supabase = await createClient();
-
-  // The all-profiles fetch already includes the current user's own row, so
-  // there's no need for a separate profile-by-id query for the username.
-  const [{ data: items }, { data: profiles }, { data: memberships }, { data: stats }] =
-    await Promise.all([
-      supabase
-        .from("shopping_items")
-        .select(
-          "id, name, category, quantity, estimated_price, is_checked, is_wishlist, added_by, checked_by, checked_at, created_at"
-        )
-        .eq("group_id", groupId)
-        .eq("is_wishlist", false)
-        .order("created_at", { ascending: true }),
-      supabase.from("profiles").select("id, username"),
-      supabase.from("group_members").select("groups(id, name)").eq("user_id", userId),
-      supabase
-        .from("shopping_item_stats")
-        .select("name, category")
-        .eq("group_id", groupId)
-        .gte("times_bought", 2)
-        .order("times_bought", { ascending: false })
-        .limit(10),
-    ]);
-
-  const profileMap: Record<string, string> = {};
-  for (const p of profiles ?? []) {
-    profileMap[p.id] = p.username;
-  }
-
-  const groups = (memberships ?? [])
-    .map((m) => m.groups as unknown as { id: string; name: string } | null)
-    .filter((g): g is { id: string; name: string } => g !== null);
-
+  // No Supabase calls here anymore — items/groups/profiles are fetched
+  // client-side (see shopping-list.tsx) through TanStack Query, so this
+  // route's server render has nothing to wait on and the navigation itself
+  // is instant. The query cache then serves cached data immediately on
+  // repeat visits while revalidating in the background.
   return (
     <ShoppingList
       key={groupId}
       groupId={groupId}
-      groups={groups}
       currentUserId={userId}
-      currentUsername={profileMap[userId] ?? userEmail ?? "אני"}
-      initialItems={items ?? []}
-      initialProfiles={profileMap}
-      frequentItems={stats ?? []}
+      currentUserEmail={userEmail}
     />
   );
 }

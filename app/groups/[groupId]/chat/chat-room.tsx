@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   RealtimeChannel,
   RealtimePostgresInsertPayload,
@@ -8,6 +9,7 @@ import type {
   RealtimePostgresDeletePayload,
 } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { useGroupMeta, type GroupMeta } from "@/lib/hooks/use-group-meta";
 import GroupHeader from "@/components/group-header";
 
 type MessageRow = {
@@ -42,6 +44,8 @@ const ATTACHMENTS_BUCKET = "chat-attachments";
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 
+const MESSAGES_KEY = (groupId: string) => ["chat-messages", groupId] as const;
+
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -60,21 +64,55 @@ function sanitizeFilename(name: string) {
   return name.replace(/[^A-Za-z0-9._-]/g, "_").slice(-100);
 }
 
+async function fetchMessages(groupId: string): Promise<Message[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("messages")
+    .select(
+      "id, content, created_at, updated_at, user_id, attachment_path, attachment_name, attachment_type, attachment_size, profiles(username), message_reactions(id, emoji, user_id, profiles(username))"
+    )
+    .eq("group_id", groupId)
+    .order("created_at", { ascending: true })
+    .limit(100);
+
+  return (data ?? []).map((m) => ({
+    id: m.id,
+    content: m.content,
+    created_at: m.created_at,
+    updated_at: m.updated_at,
+    user_id: m.user_id,
+    attachment_path: m.attachment_path,
+    attachment_name: m.attachment_name,
+    attachment_type: m.attachment_type,
+    attachment_size: m.attachment_size,
+    // Supabase returns the joined row as an object here since it's a to-one relationship
+    username: (m.profiles as unknown as { username: string } | null)?.username ?? "משתמש",
+    reactions: (
+      (m.message_reactions ?? []) as unknown as {
+        id: number;
+        emoji: string;
+        user_id: string;
+        profiles: { username: string } | null;
+      }[]
+    ).map((r) => ({
+      id: r.id,
+      emoji: r.emoji,
+      user_id: r.user_id,
+      username: r.profiles?.username ?? "משתמש",
+    })),
+  }));
+}
+
 export default function ChatRoom({
   groupId,
-  groups,
   currentUserId,
-  currentUsername,
-  initialMessages,
+  currentUserEmail,
 }: {
   groupId: string;
-  groupName: string;
-  groups: { id: string; name: string }[];
   currentUserId: string;
-  currentUsername: string;
-  initialMessages: Message[];
+  currentUserEmail: string | null;
 }) {
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const queryClient = useQueryClient();
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -95,9 +133,6 @@ export default function ChatRoom({
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
-  const usernameCache = useRef<Map<string, string>>(
-    new Map(initialMessages.map((m) => [m.user_id, m.username]))
-  );
   const channelRef = useRef<ReturnType<
     ReturnType<typeof createClient>["channel"]
   > | null>(null);
@@ -106,9 +141,15 @@ export default function ChatRoom({
   );
   const lastTypingSentRef = useRef(0);
 
-  useEffect(() => {
-    usernameCache.current.set(currentUserId, currentUsername);
-  }, [currentUserId, currentUsername]);
+  const { data: meta } = useGroupMeta(currentUserId, currentUserEmail);
+  const groups = meta?.groups ?? [];
+  const currentUsername = meta?.currentUsername ?? currentUserEmail ?? "אני";
+
+  const { data: messagesData } = useQuery({
+    queryKey: MESSAGES_KEY(groupId),
+    queryFn: () => fetchMessages(groupId),
+  });
+  const messages = useMemo(() => messagesData ?? [], [messagesData]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView();
@@ -143,31 +184,23 @@ export default function ChatRoom({
     const supabase = createClient();
     const typingTimeouts = typingTimeoutsRef.current;
 
-    async function resolveUsername(userId: string) {
-      const cached = usernameCache.current.get(userId);
-      if (cached) return cached;
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("username")
-        .eq("id", userId)
-        .single();
-      const username = profile?.username ?? "משתמש";
-      usernameCache.current.set(userId, username);
-      return username;
+    // group-meta already holds every profile's username, so resolving one
+    // here is a synchronous cache read instead of a per-message query.
+    function resolveUsername(userId: string) {
+      const meta = queryClient.getQueryData<GroupMeta>(["group-meta", currentUserId]);
+      return meta?.profileMap[userId] ?? "משתמש";
     }
 
-    const handleInsert = async (
-      payload: RealtimePostgresInsertPayload<MessageRow>
-    ) => {
+    const handleInsert = (payload: RealtimePostgresInsertPayload<MessageRow>) => {
       const row = payload.new;
-      const username = await resolveUsername(row.user_id);
+      const username = resolveUsername(row.user_id);
 
       let wasAdded = false;
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === row.id)) return prev;
+      queryClient.setQueryData<Message[]>(MESSAGES_KEY(groupId), (prev) => {
+        const list = prev ?? [];
+        if (list.some((m) => m.id === row.id)) return list;
         wasAdded = true;
-        return [...prev, { ...row, username, reactions: [] }];
+        return [...list, { ...row, username, reactions: [] }];
       });
 
       if (wasAdded) {
@@ -190,14 +223,12 @@ export default function ChatRoom({
       });
     };
 
-    const handleUpdate = async (
-      payload: RealtimePostgresUpdatePayload<MessageRow>
-    ) => {
+    const handleUpdate = (payload: RealtimePostgresUpdatePayload<MessageRow>) => {
       const row = payload.new;
-      const username = await resolveUsername(row.user_id);
+      const username = resolveUsername(row.user_id);
 
-      setMessages((prev) =>
-        prev.map((m) =>
+      queryClient.setQueryData<Message[]>(MESSAGES_KEY(groupId), (prev) =>
+        (prev ?? []).map((m) =>
           m.id === row.id ? { ...row, username, reactions: m.reactions } : m
         )
       );
@@ -206,17 +237,17 @@ export default function ChatRoom({
     const handleDelete = (payload: RealtimePostgresDeletePayload<MessageRow>) => {
       const deletedId = payload.old.id;
       if (deletedId === undefined) return;
-      setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+      queryClient.setQueryData<Message[]>(MESSAGES_KEY(groupId), (prev) =>
+        (prev ?? []).filter((m) => m.id !== deletedId)
+      );
     };
 
-    const handleReactionInsert = async (
-      payload: RealtimePostgresInsertPayload<ReactionRow>
-    ) => {
+    const handleReactionInsert = (payload: RealtimePostgresInsertPayload<ReactionRow>) => {
       const row = payload.new;
-      const username = await resolveUsername(row.user_id);
+      const username = resolveUsername(row.user_id);
 
-      setMessages((prev) =>
-        prev.map((m) =>
+      queryClient.setQueryData<Message[]>(MESSAGES_KEY(groupId), (prev) =>
+        (prev ?? []).map((m) =>
           m.id === row.message_id && !m.reactions.some((r) => r.id === row.id)
             ? {
                 ...m,
@@ -235,8 +266,8 @@ export default function ChatRoom({
     ) => {
       const deletedId = payload.old.id;
       if (deletedId === undefined) return;
-      setMessages((prev) =>
-        prev.map((m) =>
+      queryClient.setQueryData<Message[]>(MESSAGES_KEY(groupId), (prev) =>
+        (prev ?? []).map((m) =>
           m.reactions.some((r) => r.id === deletedId)
             ? { ...m, reactions: m.reactions.filter((r) => r.id !== deletedId) }
             : m
@@ -373,7 +404,7 @@ export default function ChatRoom({
       if (channel) supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [groupId, currentUserId, currentUsername]);
+  }, [groupId, currentUserId, currentUsername, queryClient]);
 
   // Mark the latest message as read (via presence) whenever the message
   // list changes — but only while the tab is actually focused. Without the
