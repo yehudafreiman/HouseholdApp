@@ -85,7 +85,7 @@ export default function ShoppingList({
   const profileMap = useMemo(() => meta?.profileMap ?? {}, [meta]);
   const currentUsername = meta?.currentUsername ?? currentUserEmail ?? "אני";
 
-  const { data: itemsData } = useQuery({
+  const { data: itemsData, isPending: itemsPending } = useQuery({
     queryKey: ITEMS_KEY(groupId),
     queryFn: () => fetchItems(groupId),
   });
@@ -96,6 +96,13 @@ export default function ShoppingList({
     queryFn: () => fetchStats(groupId),
   });
   const frequentItems = statsData ?? [];
+
+  // Items whose category is still "אחר" pending the background AI call —
+  // shown with a small "מסווג..." hint so it doesn't read as a wrong/final
+  // categorization. Cleared when categorizeInBackground's request settles,
+  // not when the category value changes, since "אחר" can also be the real
+  // (correct) answer.
+  const [categorizingIds, setCategorizingIds] = useState<Set<number>>(new Set());
 
   // If an item references a user we don't have a username for yet (e.g.
   // someone joined mid-session after group-meta was cached), refresh it.
@@ -212,6 +219,7 @@ export default function ShoppingList({
   // and updates the row's category once it resolves. Everyone (including
   // this tab) picks up the change via the existing realtime UPDATE handler.
   function categorizeInBackground(itemId: number, itemName: string) {
+    setCategorizingIds((prev) => new Set(prev).add(itemId));
     fetch("/api/categorize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -228,6 +236,13 @@ export default function ShoppingList({
       })
       .catch(() => {
         // Background best-effort — the item just stays "אחר".
+      })
+      .finally(() => {
+        setCategorizingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(itemId);
+          return next;
+        });
       });
   }
 
@@ -384,78 +399,96 @@ export default function ShoppingList({
       />
 
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-5">
-        {items.length === 0 && (
-          <p className="text-center text-sm text-zinc-400 mt-8">
-            הרשימה ריקה — הוסיפו את הפריט הראשון למטה.
-          </p>
-        )}
-
-        {orderedCategories.map((category) => (
-          <div key={category} className="flex flex-col gap-1.5">
-            <h2 className="text-xs font-semibold text-zinc-500">{category}</h2>
-            <div className="flex flex-col gap-1">
-              {sortItems(grouped.get(category) ?? []).map((item) => {
-                const addedByName = profileMap[item.added_by] ?? "משתמש";
-                const checkedByName = item.checked_by ? profileMap[item.checked_by] : null;
-
-                return (
-                  <div
-                    key={item.id}
-                    className={`flex items-center gap-2 rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-900 px-3 py-2 ${
-                      item.is_checked ? "opacity-50" : ""
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggleChecked(item)}
-                      className="flex flex-1 min-w-0 items-center gap-2 py-2 text-right"
-                    >
-                      <span
-                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs transition-colors ${
-                          item.is_checked
-                            ? "border-foreground bg-foreground text-background"
-                            : "border-black/10 dark:border-white/15"
-                        }`}
-                        aria-hidden="true"
-                      >
-                        {item.is_checked && "✓"}
-                      </span>
-                      <span className="flex-1 min-w-0">
-                        <span className="flex items-center gap-2 flex-wrap">
-                          <span
-                            className={`text-sm ${item.is_checked ? "line-through" : ""}`}
-                          >
-                            {item.name}
-                          </span>
-                          {item.quantity && (
-                            <span className="text-xs text-zinc-400">×{item.quantity}</span>
-                          )}
-                          {item.estimated_price != null && (
-                            <span className="text-xs text-zinc-400">
-                              ~{Number(item.estimated_price).toFixed(0)} ₪
-                            </span>
-                          )}
-                        </span>
-                        <span className="block text-[10px] text-zinc-400">
-                          {item.is_checked
-                            ? `נקנה ע"י ${checkedByName ?? "משתמש"}`
-                            : `נוסף ע"י ${addedByName}`}
-                        </span>
-                      </span>
-                    </button>
-                    <button
-                      onClick={() => handleDeleteItem(item.id)}
-                      className="text-zinc-400 hover:text-red-600 text-sm shrink-0 px-1"
-                      aria-label="מחיקת פריט"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+        {itemsPending ? (
+          <div className="flex flex-col gap-1 animate-pulse" aria-hidden="true">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-11 rounded-lg border border-black/10 dark:border-white/10 bg-zinc-100 dark:bg-zinc-900"
+              />
+            ))}
           </div>
-        ))}
+        ) : (
+          <>
+            {items.length === 0 && (
+              <p className="text-center text-sm text-zinc-400 mt-8">
+                הרשימה ריקה — הוסיפו את הפריט הראשון למטה.
+              </p>
+            )}
+
+            {orderedCategories.map((category) => (
+              <div key={category} className="flex flex-col gap-1.5">
+                <h2 className="text-xs font-semibold text-zinc-500">{category}</h2>
+                <div className="flex flex-col gap-1">
+                  {sortItems(grouped.get(category) ?? []).map((item) => {
+                    const addedByName = profileMap[item.added_by] ?? "משתמש";
+                    const checkedByName = item.checked_by ? profileMap[item.checked_by] : null;
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`flex items-center gap-2 rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-900 px-3 py-2 ${
+                          item.is_checked ? "opacity-50" : ""
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleChecked(item)}
+                          className="flex flex-1 min-w-0 items-center gap-2 py-2 text-right"
+                        >
+                          <span
+                            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs transition-colors ${
+                              item.is_checked
+                                ? "border-foreground bg-foreground text-background"
+                                : "border-black/10 dark:border-white/15"
+                            }`}
+                            aria-hidden="true"
+                          >
+                            {item.is_checked && "✓"}
+                          </span>
+                          <span className="flex-1 min-w-0">
+                            <span className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`text-sm ${item.is_checked ? "line-through" : ""}`}
+                              >
+                                {item.name}
+                              </span>
+                              {item.quantity && (
+                                <span className="text-xs text-zinc-400">×{item.quantity}</span>
+                              )}
+                              {item.estimated_price != null && (
+                                <span className="text-xs text-zinc-400">
+                                  ~{Number(item.estimated_price).toFixed(0)} ₪
+                                </span>
+                              )}
+                              {categorizingIds.has(item.id) && (
+                                <span className="text-[10px] text-zinc-400 animate-pulse">
+                                  מסווג...
+                                </span>
+                              )}
+                            </span>
+                            <span className="block text-[10px] text-zinc-400">
+                              {item.is_checked
+                                ? `נקנה ע"י ${checkedByName ?? "משתמש"}`
+                                : `נוסף ע"י ${addedByName}`}
+                            </span>
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteItem(item.id)}
+                          className="text-zinc-400 hover:text-red-600 text-sm shrink-0 px-1"
+                          aria-label="מחיקת פריט"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       {suggestions.length > 0 && (

@@ -145,7 +145,7 @@ export default function ChatRoom({
   const groups = meta?.groups ?? [];
   const currentUsername = meta?.currentUsername ?? currentUserEmail ?? "אני";
 
-  const { data: messagesData } = useQuery({
+  const { data: messagesData, isPending: messagesPending } = useQuery({
     queryKey: MESSAGES_KEY(groupId),
     queryFn: () => fetchMessages(groupId),
   });
@@ -688,7 +688,19 @@ export default function ChatRoom({
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3"
       >
-        {filteredMessages.map((m) => {
+        {messagesPending ? (
+          <div className="flex flex-col gap-3 animate-pulse" aria-hidden="true">
+            {[0, 1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className={`h-9 max-w-[65%] rounded-2xl bg-zinc-200 dark:bg-zinc-800 ${
+                  i % 2 === 0 ? "self-start w-40" : "self-end w-52"
+                }`}
+              />
+            ))}
+          </div>
+        ) : (
+          filteredMessages.map((m) => {
           const isMine = m.user_id === currentUserId;
           const isEditing = editingId === m.id;
           const isActive = activeMessageId === m.id;
@@ -871,7 +883,8 @@ export default function ChatRoom({
               )}
             </div>
           );
-        })}
+        })
+        )}
         <div ref={bottomRef} />
       </div>
 
