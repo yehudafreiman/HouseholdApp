@@ -27,7 +27,7 @@ export default async function InvitePage({
     redirect(`/login?next=/groups/${groupId}/invite`);
   }
 
-  const [{ data: group }, { data: membership }] = await Promise.all([
+  const [{ data: group, error: groupError }, { data: membership }] = await Promise.all([
     supabase.from("groups").select("id, name, invite_code").eq("id", groupId).single(),
     supabase
       .from("group_members")
@@ -38,6 +38,10 @@ export default async function InvitePage({
   ]);
 
   if (!group) {
+    // .single() returns no data both when the row genuinely doesn't exist
+    // and when RLS silently denies it — logging the real error here is the
+    // difference between a debuggable report and an unexplained 404.
+    console.error("Invite page: failed to load group", { groupId, userId: user.id, error: groupError });
     notFound();
   }
 
