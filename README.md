@@ -51,21 +51,32 @@ A realtime household-coordination app built with Next.js (App Router) and Supaba
 
 ## Getting started
 
-### 1. Install dependencies
+### 1. Clone the repository
+
+```bash
+git clone <repository-url>
+cd keeps
+```
+
+(`<repository-url>` is this repo's clone URL — copy it from GitHub's **Code** button.)
+
+### 2. Install dependencies
 
 ```bash
 npm install
 ```
 
-### 2. Set up Supabase
+### 3. Set up Supabase
 
-Create a project at [supabase.com](https://supabase.com), then in **Project Settings → API** grab your **Project URL** and **anon/publishable key**.
+Create a project at [supabase.com](https://supabase.com), then in **Project Settings → API** grab your **Project URL** and **anon/publishable key**. Working on this project with someone else? Each person should set up their own Supabase project for local development rather than sharing one, so nobody's local testing touches another person's data.
 
-### 3. Set up the Claude API (for shopping list categorization)
+### 4. Set up the Claude API (for shopping list categorization)
 
 Create an API key at [platform.claude.com](https://platform.claude.com) (**API Keys** in the console — this is a separate product from a Claude.ai/Pro subscription and is billed separately, pay-as-you-go). Categorizing an item is a tiny request, so cost per item is a small fraction of a cent even with heavy use.
 
-### 4. Configure environment variables
+Working on this project with someone else? Each person creates their own key — never share an API key itself (in chat, in a commit, anywhere in plain text). It goes in your own local `.env.local` only, which is already gitignored.
+
+### 5. Configure environment variables
 
 Copy the example file and fill in the three values from steps 2 and 3:
 
@@ -81,7 +92,7 @@ ANTHROPIC_API_KEY=your-anthropic-api-key
 
 `ANTHROPIC_API_KEY` has no `NEXT_PUBLIC_` prefix — it's used only server-side (in [`lib/categorize.ts`](lib/categorize.ts), called from [`app/api/categorize/route.ts`](app/api/categorize/route.ts)) and must never be exposed to the browser.
 
-### 5. Run the database schema
+### 6. Run the database schema
 
 In the Supabase dashboard, open **SQL Editor → New query**, paste the contents of [`supabase/schema.sql`](supabase/schema.sql), and run it. This is the full, current schema for a fresh project — it includes everything below in one pass (groups, chat, shopping, wishlist, attachments storage).
 
@@ -98,7 +109,7 @@ This creates:
 
 For an **already-running** database, apply the incremental migrations instead, in order — each is idempotent (safe to re-run): `add-groups.sql` → `add-attachments.sql` → `add-item-stats.sql` → `add-wishlist.sql` → `add-deletion.sql` (owner-only group deletion + dismissible frequency suggestions). (`fix-grants.sql`, `fix-messages-fk.sql`, `add-edit-delete.sql`, `add-reactions.sql`, `add-shopping-list.sql` are earlier historical patches, already folded into `schema.sql` — not needed for a new setup or if you're already past them.)
 
-### 6. Run the dev server
+### 7. Run the dev server
 
 ```bash
 npm run dev
@@ -106,7 +117,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). You'll be redirected to `/login` to sign up or sign in, then to `/groups` — create a group or join one with an invite code. Inside a group, the tab bar switches between Chat, Shopping, and Wishlist; the invite and feedback icons sit separately as smaller utility links.
 
-### 7. Regression-test the categorizer (optional)
+### 8. Regression-test the categorizer (optional)
 
 ```bash
 npm run test:categorize
