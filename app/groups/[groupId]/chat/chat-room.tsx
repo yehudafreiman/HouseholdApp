@@ -11,6 +11,17 @@ import type {
 import { createClient } from "@/lib/supabase/client";
 import { useGroupMeta, type GroupMeta } from "@/lib/hooks/use-group-meta";
 import GroupHeader from "@/components/group-header";
+import {
+  SearchIcon,
+  XIcon,
+  PaperclipIcon,
+  ImageIcon,
+  VideoIcon,
+  MusicIcon,
+  FileIcon,
+  MoreHorizontalIcon,
+  ArrowDownIcon,
+} from "@/components/icons";
 
 type MessageRow = {
   id: number;
@@ -38,12 +49,11 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function fileEmoji(mimeType: string) {
-  if (mimeType.startsWith("image/")) return "🖼️";
-  if (mimeType.startsWith("video/")) return "🎥";
-  if (mimeType.startsWith("audio/")) return "🎵";
-  if (mimeType === "application/pdf") return "📄";
-  return "📎";
+function FileTypeIcon({ mimeType, className }: { mimeType: string; className?: string }) {
+  if (mimeType.startsWith("image/")) return <ImageIcon className={className} />;
+  if (mimeType.startsWith("video/")) return <VideoIcon className={className} />;
+  if (mimeType.startsWith("audio/")) return <MusicIcon className={className} />;
+  return <FileIcon className={className} />;
 }
 
 function sanitizeFilename(name: string) {
@@ -425,10 +435,10 @@ export default function ChatRoom({
               setSearchOpen((open) => !open);
               if (searchOpen) setSearchQuery("");
             }}
-            className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+            className="text-zinc-500 transition hover:text-zinc-800 dark:hover:text-zinc-200 active:scale-90"
             aria-label="חיפוש בהודעות"
           >
-            🔍
+            <SearchIcon className="h-[18px] w-[18px]" />
           </button>
         }
         subtitle={
@@ -446,7 +456,7 @@ export default function ChatRoom({
             onChange={(e) => setSearchQuery(e.target.value)}
             autoFocus
             placeholder="חיפוש בהודעות..."
-            className="flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-1.5 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+            className="flex-1 rounded-full bg-white dark:bg-zinc-900 shadow-inset px-4 py-1.5 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
           />
           {trimmedQuery && (
             <span className="text-xs text-zinc-500 whitespace-nowrap">
@@ -458,9 +468,9 @@ export default function ChatRoom({
               setSearchOpen(false);
               setSearchQuery("");
             }}
-            className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+            className="text-zinc-500 transition hover:text-zinc-800 dark:hover:text-zinc-200 active:scale-90"
           >
-            ✕
+            <XIcon className="h-4 w-4" />
           </button>
         </div>
       )}
@@ -481,7 +491,8 @@ export default function ChatRoom({
             ))}
           </div>
         ) : (
-          filteredMessages.map((m) => {
+          <div className="flex flex-col gap-3 animate-fade-in">
+          {filteredMessages.map((m) => {
             const isMine = m.user_id === currentUserId;
             const isEditing = editingId === m.id;
             const isActive = activeMessageId === m.id;
@@ -503,17 +514,17 @@ export default function ChatRoom({
                       value={editContent}
                       onChange={(e) => setEditContent(e.target.value)}
                       autoFocus
-                      className="rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+                      className="rounded-full bg-white dark:bg-zinc-900 shadow-inset px-4 py-2 text-base outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
                     />
                     <button
                       onClick={() => saveEdit(m.id)}
-                      className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                      className="text-xs text-zinc-500 transition hover:text-zinc-800 dark:hover:text-zinc-200 active:scale-90"
                     >
                       שמירה
                     </button>
                     <button
                       onClick={cancelEdit}
-                      className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                      className="text-xs text-zinc-500 transition hover:text-zinc-800 dark:hover:text-zinc-200 active:scale-90"
                     >
                       ביטול
                     </button>
@@ -526,13 +537,13 @@ export default function ChatRoom({
                       >
                         <button
                           onClick={() => startEdit(m)}
-                          className="hover:text-zinc-800 dark:hover:text-zinc-200"
+                          className="transition hover:text-zinc-800 dark:hover:text-zinc-200 active:scale-90"
                         >
                           עריכה
                         </button>
                         <button
                           onClick={() => handleDeleteMessage(m.id)}
-                          className="hover:text-red-600"
+                          className="transition hover:text-red-600 active:scale-90"
                         >
                           מחיקה
                         </button>
@@ -540,16 +551,16 @@ export default function ChatRoom({
                     )}
                     <button
                       onClick={() => setActiveMessageId(isActive ? null : m.id)}
-                      className="text-xs text-zinc-400 opacity-60 hover:opacity-100 px-1"
+                      className="text-zinc-400 opacity-60 transition hover:opacity-100 active:scale-90 px-1"
                       aria-label="פעולות נוספות"
                     >
-                      ⋯
+                      <MoreHorizontalIcon className="h-4 w-4" />
                     </button>
                     <div
-                      className={`rounded-2xl px-4 py-2 text-sm ${
+                      className={`rounded-2xl px-4 py-3 text-base shadow-raised ${
                         isMine
-                          ? "bg-foreground text-background"
-                          : "bg-white dark:bg-zinc-900 border border-black/10 dark:border-white/10"
+                          ? "bg-accent text-accent-foreground"
+                          : "bg-white dark:bg-zinc-900"
                       }`}
                     >
                       {m.attachment_path && (
@@ -574,14 +585,17 @@ export default function ChatRoom({
                                   : "border-black/10 dark:border-white/10"
                               }`}
                             >
-                              <span>{fileEmoji(m.attachment_type ?? "")}</span>
+                              <FileTypeIcon
+                                mimeType={m.attachment_type ?? ""}
+                                className="h-5 w-5 shrink-0"
+                              />
                               <span className="flex flex-col">
                                 <span className="text-xs font-medium truncate max-w-[12rem]">
                                   {m.attachment_name}
                                 </span>
                                 {m.attachment_size !== null && (
                                   <span
-                                    className={`text-[10px] ${isMine ? "opacity-70" : "text-zinc-400"}`}
+                                    className={`text-xs ${isMine ? "opacity-70" : "text-zinc-400"}`}
                                   >
                                     {formatFileSize(m.attachment_size)}
                                   </span>
@@ -594,7 +608,7 @@ export default function ChatRoom({
                       {m.content && highlightMatch(m.content)}
                       {wasEdited && (
                         <span
-                          className={`text-[10px] mr-2 ${isMine ? "opacity-70" : "text-zinc-400"}`}
+                          className={`text-xs mr-2 ${isMine ? "opacity-70" : "text-zinc-400"}`}
                         >
                           נערך
                         </span>
@@ -604,7 +618,8 @@ export default function ChatRoom({
                 )}
               </div>
             );
-          })
+          })}
+          </div>
         )}
         <div ref={bottomRef} />
       </div>
@@ -613,9 +628,9 @@ export default function ChatRoom({
         <div className="flex justify-center pb-1">
           <button
             onClick={scrollToBottom}
-            className="rounded-full bg-foreground text-background text-xs px-4 py-1.5 shadow"
+            className="flex items-center gap-1 rounded-full bg-accent text-accent-foreground text-xs px-4 py-1.5 shadow-raised transition hover:opacity-90 active:scale-95"
           >
-            ↓ {unreadCount} הודעות חדשות
+            <ArrowDownIcon className="h-3.5 w-3.5" /> {unreadCount} הודעות חדשות
           </button>
         </div>
       )}
@@ -639,9 +654,9 @@ export default function ChatRoom({
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading || sending}
           aria-label="צירוף קובץ"
-          className="shrink-0 text-lg opacity-60 hover:opacity-100 disabled:opacity-30"
+          className="shrink-0 opacity-60 transition hover:opacity-100 active:scale-90 disabled:opacity-30 disabled:active:scale-100"
         >
-          📎
+          <PaperclipIcon className="h-5 w-5" />
         </button>
         <input
           type="text"
@@ -649,12 +664,12 @@ export default function ChatRoom({
           onChange={(e) => setContent(e.target.value)}
           placeholder={uploading ? "מעלה קובץ..." : "הקלד/י הודעה..."}
           disabled={uploading}
-          className="flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20 disabled:opacity-60"
+          className="flex-1 rounded-full bg-white dark:bg-zinc-900 shadow-inset px-4 py-2 text-base outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20 disabled:opacity-60"
         />
         <button
           type="submit"
           disabled={sending || uploading || !content.trim()}
-          className="rounded-full bg-foreground text-background px-5 py-2 text-sm font-medium disabled:opacity-50"
+          className="rounded-full bg-accent text-accent-foreground px-5 py-2 text-base font-medium shadow-raised transition hover:opacity-90 active:scale-95 disabled:opacity-50 disabled:active:scale-100"
         >
           שליחה
         </button>

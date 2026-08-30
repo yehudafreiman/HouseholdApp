@@ -5,11 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import GroupSwitcher from "./group-switcher";
+import { MessageIcon, CartIcon, StarIcon, LinkIcon, MailIcon } from "./icons";
 
 const TABS = [
-  { key: "chat", icon: "💬", label: "צ'אט" },
-  { key: "shopping", icon: "🛒", label: "קניות" },
-  { key: "wishlist", icon: "⭐", label: "משאלות" },
+  { key: "chat", Icon: MessageIcon, label: "צ'אט" },
+  { key: "shopping", Icon: CartIcon, label: "קניות" },
+  { key: "wishlist", Icon: StarIcon, label: "משאלות" },
 ] as const;
 
 export default function GroupHeader({
@@ -49,21 +50,21 @@ export default function GroupHeader({
           {extraActions}
           <Link
             href={`/groups/${groupId}/invite`}
-            className="text-sm text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
+            className="text-zinc-400 transition hover:text-zinc-700 dark:hover:text-zinc-300 active:scale-90"
             aria-label="הזמנת חברים"
           >
-            🔗
+            <LinkIcon className="h-[18px] w-[18px]" />
           </Link>
           <Link
             href={`/groups/${groupId}/feedback`}
-            className="text-sm text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
+            className="text-zinc-400 transition hover:text-zinc-700 dark:hover:text-zinc-300 active:scale-90"
             aria-label="דיווח על בעיה / הצעה לשיפור"
           >
-            📮
+            <MailIcon className="h-[18px] w-[18px]" />
           </Link>
           <button
             onClick={handleSignOut}
-            className="text-xs text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
+            className="text-xs text-zinc-400 transition hover:text-zinc-700 dark:hover:text-zinc-300 active:scale-90"
           >
             התנתקות
           </button>
@@ -82,13 +83,13 @@ export default function GroupHeader({
               key={tab.key}
               href={`/groups/${groupId}/${tab.key}`}
               aria-current={isActive ? "page" : undefined}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-full py-1.5 text-xs font-medium transition-colors ${
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-full py-1.5 text-xs font-medium transition active:scale-95 ${
                 isActive
-                  ? "bg-foreground text-background"
+                  ? "bg-accent text-accent-foreground shadow-raised"
                   : "text-zinc-500 dark:text-zinc-400 hover:bg-black/5 dark:hover:bg-white/10"
               }`}
             >
-              <span>{tab.icon}</span>
+              <tab.Icon className="h-4 w-4" />
               <span>{tab.label}</span>
             </Link>
           );
