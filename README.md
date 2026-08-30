@@ -1,4 +1,4 @@
-# Household App — Groups, Chat & Shopping
+# Keeps
 
 A realtime household-coordination app built with Next.js (App Router) and Supabase — email/password auth, multiple isolated household groups, Postgres-backed chat with Row Level Security and live delivery via Supabase Realtime, and a shared shopping list (plus a non-urgent wishlist) with AI-powered item categorization.
 
@@ -7,10 +7,10 @@ A realtime household-coordination app built with Next.js (App Router) and Supaba
 **Groups**
 - A user can belong to multiple groups at once (e.g. more than one household) — each group has its own fully isolated chat and shopping list, enforced at the RLS layer, not just the UI
 - Create a group or join one via a shareable invite code (WhatsApp-group style) — no contact picker
-- A group switcher appears once you're in more than one group; with exactly one group you land straight in it, with a `+` link always available to reach the create/join screen
+- A group switcher appears once you're in more than one group; with exactly one group you land straight in the shopping list, with a `+` link always available to reach the create/join screen
 - Owners can permanently delete a group — chat, shopping list, and membership all cascade via existing foreign keys, gated behind a confirm dialog and an owner-only RLS policy
 - Old `/chat` and `/shopping` URLs (from before groups existed) redirect into `/groups`, so existing bookmarks/home-screen shortcuts keep working
-- A tab bar (💬 chat / 🛒 shopping / ⭐ wishlist) always shows all three sections with the active one highlighted, so it's clear which page you're on — invite/feedback/sign-out sit apart from it as smaller, muted "actions from here" links, not navigation
+- A tab bar (Chat / Shopping / Wishlist) always shows all three sections with the active one highlighted, so it's clear which page you're on — invite/feedback/sign-out sit apart from it as smaller, muted "actions from here" links, not navigation
 
 **Chat**
 - Live messaging — new messages appear instantly for everyone, no reload
@@ -23,20 +23,19 @@ A realtime household-coordination app built with Next.js (App Router) and Supaba
 > Deliberately does **not** have emoji reactions, a typing indicator, online presence, or read receipts. Those were chat-app-parity features that added real-time channels and UI weight without serving this app's actual job — quick coordination tied to the shopping list, not competing with WhatsApp as a messaging app. See "How it works" below if resurrecting any of them.
 
 **Shopping list**
-- Shared, realtime-synced list per group
+- Shared, realtime-synced list per group, and the default page a group opens to
 - Adding an item classifies it into one of 22 categories via the Claude API — the list groups by category. Adding doesn't wait on the AI call: the item appears immediately and re-categorizes in the background once the classification comes back
 - Name, quantity, and price are all on one row with the add button — no extra line for the optional fields
-- "קונים לעיתים קרובות" — items bought 2+ times show as tap-to-add suggestion chips, using the category already known from history (skips the AI call entirely); each chip can be dismissed on its own with a small "✕" if it's not actually a staple
-- Check items off (tapping anywhere on the row, not just a small checkbox); "נקה מסומנים" bulk-clears everything checked in one action
-- Delete is a plain "✕" per item, matching the original design language rather than a heavier icon button
+- "קונים לעיתים קרובות" (frequently bought) — items bought 2+ times show as tap-to-add suggestion chips, using the category already known from history (skips the AI call entirely); each chip can be dismissed on its own if it's not actually a staple
+- Check items off by tapping anywhere on the row, not just the checkbox; "נקה מסומנים" (clear checked) bulk-clears everything checked in one action
 
 **Wishlist**
 - A separate, non-urgent list at `/groups/[groupId]/wishlist` for things spotted in-store that aren't worth interrupting the current trip for
-- "עברתי לקנייה" moves an item into the real shopping list in one action — it keeps whatever category it already resolved to
+- "עברתי לקנייה" (moved to shopping) moves an item into the real shopping list in one action — it keeps whatever category it already resolved to
 - Same single-row add form as the shopping list
 
 **Feedback**
-- 📮 in the header opens a simple bug/suggestion form at `/groups/[groupId]/feedback`
+- The mail icon in the header opens a simple bug/suggestion form at `/groups/[groupId]/feedback`
 - No backend or storage — submitting just opens a `mailto:` link to the developer with the sender and group name filled in automatically
 
 ## Stack
@@ -48,7 +47,7 @@ A realtime household-coordination app built with Next.js (App Router) and Supaba
 - [Tailwind CSS](https://tailwindcss.com) v4
 - TypeScript
 
-> **Note:** this project runs on a pre-release Next.js version with some breaking changes from the docs you may know — most notably, `middleware.ts` is renamed `proxy.ts`. See [`AGENTS.md`](AGENTS.md).
+> **Note:** this project currently runs on a pre-release Next.js version with a few breaking changes from the stable docs — most notably, `middleware.ts` is renamed `proxy.ts`. Keep that in mind if something in the official Next.js docs doesn't line up with this codebase.
 
 ## Getting started
 
@@ -66,7 +65,13 @@ Create a project at [supabase.com](https://supabase.com), then in **Project Sett
 
 Create an API key at [platform.claude.com](https://platform.claude.com) (**API Keys** in the console — this is a separate product from a Claude.ai/Pro subscription and is billed separately, pay-as-you-go). Categorizing an item is a tiny request, so cost per item is a small fraction of a cent even with heavy use.
 
-Create `.env.local` in the project root:
+### 4. Configure environment variables
+
+Copy the example file and fill in the three values from steps 2 and 3:
+
+```bash
+cp .env.example .env.local
+```
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=your-project-url
@@ -76,7 +81,7 @@ ANTHROPIC_API_KEY=your-anthropic-api-key
 
 `ANTHROPIC_API_KEY` has no `NEXT_PUBLIC_` prefix — it's used only server-side (in [`lib/categorize.ts`](lib/categorize.ts), called from [`app/api/categorize/route.ts`](app/api/categorize/route.ts)) and must never be exposed to the browser.
 
-### 4. Run the database schema
+### 5. Run the database schema
 
 In the Supabase dashboard, open **SQL Editor → New query**, paste the contents of [`supabase/schema.sql`](supabase/schema.sql), and run it. This is the full, current schema for a fresh project — it includes everything below in one pass (groups, chat, shopping, wishlist, attachments storage).
 
@@ -93,15 +98,15 @@ This creates:
 
 For an **already-running** database, apply the incremental migrations instead, in order — each is idempotent (safe to re-run): `add-groups.sql` → `add-attachments.sql` → `add-item-stats.sql` → `add-wishlist.sql` → `add-deletion.sql` (owner-only group deletion + dismissible frequency suggestions). (`fix-grants.sql`, `fix-messages-fk.sql`, `add-edit-delete.sql`, `add-reactions.sql`, `add-shopping-list.sql` are earlier historical patches, already folded into `schema.sql` — not needed for a new setup or if you're already past them.)
 
-### 5. Run the dev server
+### 6. Run the dev server
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). You'll be redirected to `/login` to sign up or sign in, then to `/groups` — create a group or join one with an invite code. Inside a group, use the tab bar to switch between 💬 chat, 🛒 shopping, and ⭐ wishlist; 🔗 invite and 📮 feedback sit separately as smaller utility links.
+Open [http://localhost:3000](http://localhost:3000). You'll be redirected to `/login` to sign up or sign in, then to `/groups` — create a group or join one with an invite code. Inside a group, the tab bar switches between Chat, Shopping, and Wishlist; the invite and feedback icons sit separately as smaller utility links.
 
-### 6. Regression-test the categorizer (optional)
+### 7. Regression-test the categorizer (optional)
 
 ```bash
 npm run test:categorize
@@ -109,15 +114,34 @@ npm run test:categorize
 
 Runs a curated set of representative/edge-case items against `lib/categorize.ts` directly (no server needed), calling each one twice to catch non-determinism, not just wrong answers — see [`scripts/test-categorization.ts`](scripts/test-categorization.ts). Worth re-running whenever the categorize prompt or model changes.
 
+## Deployment
+
+The app is a standard Next.js App Router project and deploys to anything that runs Node.js. Whichever host you use, set the same three environment variables from step 4 above in its dashboard/CLI before the first deploy.
+
+**Vercel** (built by the same team as Next.js, zero-config for this stack):
+
+1. Import the repository at [vercel.com/new](https://vercel.com/new)
+2. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `ANTHROPIC_API_KEY` under **Settings → Environment Variables**
+3. Deploy — Vercel detects the Next.js build automatically, no config file needed
+
+**Generic Node host** (Railway, Render, Fly.io, a VPS, etc.):
+
+```bash
+npm run build
+npm run start
+```
+
+`npm run build` produces a standard Next.js production build; `npm run start` serves it on port 3000 (override with `PORT`). Point the platform's environment variable settings at the same three keys, and make sure the platform runs a supported Node.js version for Next.js 16 (Node 20.9+).
+
 ## How it works
 
 - **Auth**: `@supabase/ssr` wires Supabase sessions into cookies for both server and client components ([`lib/supabase/server.ts`](lib/supabase/server.ts), [`lib/supabase/client.ts`](lib/supabase/client.ts)).
 - **Route protection**: [`proxy.ts`](proxy.ts) (via [`lib/supabase/proxy.ts`](lib/supabase/proxy.ts)) reads the session from the cookie on every request and redirects unauthenticated users away from `/groups` and `/join`, and authenticated users away from `/login`. It also forwards that user id (and email) to Server Components via an `x-user-id` request header, purely for UX labels/redirects — **see "Security & performance tradeoffs" below, this identity is not server-verified.**
 - **Groups**: [`app/groups/[groupId]/layout.tsx`](app/groups/[groupId]/layout.tsx) guards every route under a group, redirecting to `/groups` if the user isn't a member. Creating/joining a group goes through `security definer` RPCs (`create_group`, `join_group_by_code`) so a not-yet-member can look up a group by invite code without the `groups` table's select policy ever being loosened to "everyone can see every group."
-- **Chat/shopping/wishlist UI**: `page.tsx` for each does only the free `!userId` header check — no Supabase calls — and renders a client component (`chat-room.tsx`, `shopping-list.tsx`, `wishlist.tsx`). Those client components fetch their own data via TanStack Query (`useQuery`), share a `useGroupMeta` hook ([`lib/hooks/use-group-meta.ts`](lib/hooks/use-group-meta.ts)) for the group list/profile map/username, and subscribe to Realtime for live updates, writing into the query cache via `queryClient.setQueryData(...)`. See "Client-side caching" below. A wishlist item is a normal `shopping_items` row with `is_wishlist = true` — not a separate table — so "עברתי לקנייה" is a single `UPDATE` instead of a delete+insert.
+- **Chat/shopping/wishlist UI**: `page.tsx` for each does only the free `!userId` header check — no Supabase calls — and renders a client component (`chat-room.tsx`, `shopping-list.tsx`, `wishlist.tsx`). Those client components fetch their own data via TanStack Query (`useQuery`), share a `useGroupMeta` hook ([`lib/hooks/use-group-meta.ts`](lib/hooks/use-group-meta.ts)) for the group list/profile map/username, and subscribe to Realtime for live updates, writing into the query cache via `queryClient.setQueryData(...)`. See "Client-side caching" below. A wishlist item is a normal `shopping_items` row with `is_wishlist = true` — not a separate table — so "moved to shopping" is a single `UPDATE` instead of a delete+insert.
 - **Realtime auth**: the Supabase Realtime socket needs the user's access token explicitly passed via `supabase.realtime.setAuth()` before subscribing — the browser client doesn't wire this up automatically, and without it, RLS silently rejects incoming realtime events.
 - **Realtime filter caution**: Postgres `DELETE` events without `REPLICA IDENTITY FULL` only carry primary-key columns in `payload.old` — a Realtime `filter` referencing any other column (like `group_id`) on a `DELETE` subscription silently matches nothing, dropping every delete event with no error. Every list in this app (messages, shopping items) subscribes to `DELETE` **unfiltered** and matches by id client-side instead. The same caution applies to `is_wishlist`: rather than adding a second equality clause to a Realtime filter string, the shopping list and wishlist filter `is_wishlist` client-side in their `INSERT`/`UPDATE` handlers.
-- **Chat scope, deliberately trimmed (2026-08-27)**: emoji reactions, a typing indicator, online presence, and read receipts were removed — each was its own Realtime channel/subscription (presence and broadcast have no RLS at all, unlike `postgres_changes`) adding real maintenance surface for chat-app-parity polish that didn't serve this app's actual job (household coordination tied to the shopping list). The `message_reactions` table and its RLS policies/Realtime publication are still in `schema.sql` for now (removing a table is harder to reverse than removing UI code) — safe to drop in a future migration if the feature isn't coming back. `handleUpdate`'s realtime type is `MessageRow`, not `Message`, so a resurrected feature would need to re-add whatever client-only field (`username`, `reactions`, etc.) it used, the same way the current code re-derives `username` in `handleInsert`/`handleUpdate`.
+- **Chat scope, deliberately trimmed**: emoji reactions, a typing indicator, online presence, and read receipts were removed — each was its own Realtime channel/subscription (presence and broadcast have no RLS at all, unlike `postgres_changes`) adding real maintenance surface for chat-app-parity polish that didn't serve this app's actual job (household coordination tied to the shopping list). The `message_reactions` table and its RLS policies/Realtime publication are still in `schema.sql` for now (removing a table is harder to reverse than removing UI code) — safe to drop in a future migration if the feature isn't coming back. `handleUpdate`'s realtime type is `MessageRow`, not `Message`, so a resurrected feature would need to re-add whatever client-only field (`username`, `reactions`, etc.) it used, the same way the current code re-derives `username` in `handleInsert`/`handleUpdate`.
 - **AI categorization**: [`lib/categorize.ts`](lib/categorize.ts) calls Claude (`claude-sonnet-5`) with `output_config.format` (structured JSON output) constrained to the category list in [`lib/shopping.ts`](lib/shopping.ts) — the category names are also spelled out as plain text in the prompt, since the JSON schema `enum` alone only constrains output *format*, not what the model knows the options mean. The route handler ([`app/api/categorize/route.ts`](app/api/categorize/route.ts)) and the test script both call this one implementation. Sonnet 5 sometimes emits a leading `thinking` content block before its answer even for a short classification call — the code finds the `text` block explicitly rather than assuming `response.content[0]` is the answer, which was a real (silent, non-obvious) bug here before.
 - **Attachments**: objects in the `chat-attachments` bucket are keyed `{group_id}/{user_id}/{uuid}-{filename}`, so `storage.foldername(name)` gives Postgres RLS policies the group and uploader without a denormalized column. The bucket is private — display/download goes through short-lived signed URLs.
 - **Group deletion**: `groups` has no delete policy by default (per the original multi-group design) — `add-deletion.sql`/`schema.sql` add one scoped to `role = 'owner'` in `group_members`. Deleting a group cascades to its messages, shopping items, and memberships through the existing foreign keys; the UI gates it behind a native `confirm()` dialog.
@@ -143,42 +167,51 @@ Returning to a page you've already visited in the same session (chat → shoppin
 - Realtime handlers write into the query cache (`queryClient.setQueryData(...)`) instead of local component state, so an update lands correctly whether or not the page that owns that Realtime subscription happens to be the one currently mounted.
 - Net effect, measured: page-level data fetching dropped from ~230-395ms (parallel Supabase queries blocking the render) to ~8-12ms (client-side, non-blocking); combined with the `proxy.ts` change above, full navigation between tabs dropped from ~900ms-2s+ to roughly ~70-140ms.
 
+## Design system
+
+- One accent color (`--accent` / `--accent-foreground` in [`app/globals.css`](app/globals.css)) drives every primary action — submit/add/send buttons, the active tab, the checked-item state — instead of a scattered set of ad-hoc colors.
+- Two custom shadow utilities, `.shadow-raised` and `.shadow-inset`, give cards/buttons a "sitting above the page" look and inputs a "sunk into the page" look, using the same implied light source so both read as one consistent material.
+- [`components/icons.tsx`](components/icons.tsx) is a small hand-authored set of line icons (stroke-based, `currentColor`) used everywhere instead of emoji, so icon color always matches the surrounding text and looks the same across platforms — including dark mode, where emoji's baked-in colors don't adapt.
+- Interactive elements get both a hover state (mouse) and an `active:scale-*` press state (touch/mouse-down), since most real usage of this app is on a phone, where hover never fires.
+
 ## Project structure
 
 ```
 app/
-  login/page.tsx                      Sign up / sign in
-  groups/page.tsx                       Group picker / create / join
+  icon.svg                               App icon / favicon
+  login/page.tsx                          Sign up / sign in
+  groups/page.tsx                         Group picker / create / join
   groups/create-group-form.tsx
   groups/join-group-form.tsx
-  groups/[groupId]/layout.tsx           Membership guard for everything below
-  groups/[groupId]/chat/{page,chat-room}.tsx        Chat, incl. attachments
-  groups/[groupId]/shopping/{page,shopping-list}.tsx Shopping list
-  groups/[groupId]/wishlist/{page,wishlist}.tsx      Non-urgent wishlist
+  groups/[groupId]/layout.tsx             Membership guard for everything below
+  groups/[groupId]/chat/{page,chat-room}.tsx          Chat, incl. attachments
+  groups/[groupId]/shopping/{page,shopping-list}.tsx  Shopping list (default landing page)
+  groups/[groupId]/wishlist/{page,wishlist}.tsx       Non-urgent wishlist
   groups/[groupId]/invite/{page,invite-code-display}.tsx  Invite link, owner-only regenerate + group deletion
   groups/[groupId]/feedback/{page,feedback-form}.tsx  Bug/suggestion form -> mailto:
   join/[code]/{page,join-group-client}.tsx  Auto-join-on-visit flow
-  chat/page.tsx, shopping/page.tsx      Legacy redirect shims -> /groups
-  api/categorize/route.ts               Route Handler: AI item categorization
+  chat/page.tsx, shopping/page.tsx        Legacy redirect shims -> /groups
+  api/categorize/route.ts                 Route Handler: AI item categorization
 components/
-  group-header.tsx                      Tab bar (chat/shopping/wishlist) + utility links
-  group-switcher.tsx                    Group dropdown (only shown with 2+ groups)
-  query-provider.tsx                    Mounts the shared TanStack Query client
+  group-header.tsx                        Tab bar (chat/shopping/wishlist) + utility links
+  group-switcher.tsx                      Group dropdown (only shown with 2+ groups)
+  query-provider.tsx                      Mounts the shared TanStack Query client
+  icons.tsx                               Shared line-icon set used app-wide
 lib/
-  categorize.ts                         Categorize prompt + Claude call (shared with the test script)
-  shopping.ts                           Category list (shared client/server)
+  categorize.ts                           Categorize prompt + Claude call (shared with the test script)
+  shopping.ts                             Category list (shared client/server)
   hooks/
-    use-group-meta.ts                   Shared groups/profiles/username query, reused by chat/shopping/wishlist
+    use-group-meta.ts                     Shared groups/profiles/username query, reused by chat/shopping/wishlist
   supabase/
-    client.ts                           Browser Supabase client
-    server.ts                           Server Supabase client (Server Components, Route Handlers)
-    proxy.ts                            Session read + redirect logic, used by proxy.ts (getSession(), not getUser() — see security tradeoffs above)
-proxy.ts                                Next.js Proxy (formerly "Middleware") entry point
+    client.ts                             Browser Supabase client
+    server.ts                             Server Supabase client (Server Components, Route Handlers)
+    proxy.ts                              Session read + redirect logic, used by proxy.ts (getSession(), not getUser() — see security tradeoffs above)
+proxy.ts                                  Next.js Proxy (formerly "Middleware") entry point
 scripts/
-  test-categorization.ts                Regression test for the categorizer (npm run test:categorize)
+  test-categorization.ts                  Regression test for the categorizer (npm run test:categorize)
 supabase/
-  schema.sql                            Full DB schema — run this in a fresh project
+  schema.sql                              Full DB schema — run this in a fresh project
   add-groups.sql, add-attachments.sql,
   add-item-stats.sql, add-wishlist.sql,
-  add-deletion.sql                      Idempotent migrations for an existing DB, in order
+  add-deletion.sql                        Idempotent migrations for an existing DB, in order
 ```

@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -42,3 +43,7 @@ next-env.d.ts
 
 # claude code local settings
 .claude/settings.local.json
+
+# AI coding assistant config — kept locally, not shipped in the repo
+CLAUDE.md
+AGENTS.md

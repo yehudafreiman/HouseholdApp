@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Keeps",
-  description: "ניהול בית ורשימת קניות משותפת, כדי לא לקנות חלב פעמיים",
+  description: "Groups, Chat & Shopping",
 };
 
 export default function RootLayout({
