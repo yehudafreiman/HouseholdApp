@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { BugIcon, LightbulbIcon } from "@/components/icons";
 
 const FEEDBACK_EMAIL = "YehFre@icloud.com";
 
@@ -44,20 +45,20 @@ export default function FeedbackForm({
       </p>
 
       <form onSubmit={handleSubmit} className="w-full max-w-sm flex flex-col gap-3">
-        <div className="flex rounded-full border border-black/10 dark:border-white/15 overflow-hidden text-sm">
+        <div className="flex rounded-full bg-white dark:bg-zinc-900 shadow-inset overflow-hidden text-sm">
           <button
             type="button"
             onClick={() => setKind("bug")}
-            className={`flex-1 py-2 ${kind === "bug" ? "bg-foreground text-background" : "bg-white dark:bg-zinc-900"}`}
+            className={`flex flex-1 items-center justify-center gap-1.5 py-2 transition active:scale-95 ${kind === "bug" ? "bg-accent text-accent-foreground" : "hover:bg-black/5 dark:hover:bg-white/5"}`}
           >
-            🐛 באג
+            <BugIcon className="h-4 w-4" /> באג
           </button>
           <button
             type="button"
             onClick={() => setKind("idea")}
-            className={`flex-1 py-2 ${kind === "idea" ? "bg-foreground text-background" : "bg-white dark:bg-zinc-900"}`}
+            className={`flex flex-1 items-center justify-center gap-1.5 py-2 transition active:scale-95 ${kind === "idea" ? "bg-accent text-accent-foreground" : "hover:bg-black/5 dark:hover:bg-white/5"}`}
           >
-            💡 הצעה
+            <LightbulbIcon className="h-4 w-4" /> הצעה
           </button>
         </div>
 
@@ -66,19 +67,22 @@ export default function FeedbackForm({
           onChange={(e) => setText(e.target.value)}
           rows={5}
           placeholder={kind === "bug" ? "מה קרה? מה ציפית שיקרה?" : "מה היית רוצה שיהיה?"}
-          className="rounded-lg border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20 resize-none"
+          className="rounded-lg bg-white dark:bg-zinc-900 shadow-inset px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20 resize-none"
         />
 
         <button
           type="submit"
           disabled={!text.trim()}
-          className="rounded-full bg-foreground text-background px-5 py-2 text-sm font-medium disabled:opacity-50"
+          className="rounded-full bg-accent text-accent-foreground px-5 py-2 text-sm font-medium shadow-raised transition hover:opacity-90 active:scale-95 disabled:opacity-50 disabled:active:scale-100"
         >
           שליחה במייל
         </button>
       </form>
 
-      <Link href={`/groups/${groupId}/chat`} className="text-sm text-zinc-500 mt-2">
+      <Link
+        href={`/groups/${groupId}/chat`}
+        className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300 mt-2"
+      >
         חזרה לצ&apos;אט
       </Link>
     </div>

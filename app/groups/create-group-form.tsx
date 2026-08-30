@@ -27,7 +27,7 @@ export default function CreateGroupForm() {
       return;
     }
 
-    router.push(`/groups/${data}/chat`);
+    router.push(`/groups/${data}/shopping`);
     router.refresh();
   }
 
@@ -40,12 +40,12 @@ export default function CreateGroupForm() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="שם הקבוצה (למשל: המשפחה שלנו)"
-          className="min-w-0 flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+          className="min-w-0 flex-1 rounded-full bg-white dark:bg-zinc-900 shadow-inset px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
         />
         <button
           type="submit"
           disabled={submitting || !name.trim()}
-          className="shrink-0 rounded-full bg-foreground text-background px-5 py-2 text-sm font-medium disabled:opacity-50"
+          className="shrink-0 rounded-full bg-accent text-accent-foreground px-5 py-2 text-sm font-medium shadow-raised transition hover:opacity-90 active:scale-95 disabled:opacity-50 disabled:active:scale-100"
         >
           יצירה
         </button>

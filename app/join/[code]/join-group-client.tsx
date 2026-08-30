@@ -18,7 +18,7 @@ export default function JoinGroupClient({ code }: { code: string }) {
         setError("קוד ההזמנה לא תקין");
         return;
       }
-      router.push(`/groups/${data}/chat`);
+      router.push(`/groups/${data}/shopping`);
       router.refresh();
     });
 
@@ -33,7 +33,10 @@ export default function JoinGroupClient({ code }: { code: string }) {
         {error ? (
           <>
             <p className="text-red-600 mb-4">{error}</p>
-            <a href="/groups" className="text-sm text-zinc-500 underline">
+            <a
+              href="/groups"
+              className="text-sm text-zinc-500 underline hover:text-zinc-800 dark:hover:text-zinc-300"
+            >
               חזרה לקבוצות שלי
             </a>
           </>

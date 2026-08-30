@@ -74,12 +74,12 @@ export default function InviteCodeDisplay({
       <p className="text-sm text-zinc-500 text-center max-w-sm">
         שלח/י את הקוד או הקישור למי שתרצה/י להוסיף לקבוצה
       </p>
-      <div className="rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-900 px-6 py-3 text-lg font-mono tracking-widest">
+      <div className="rounded-xl bg-white dark:bg-zinc-900 px-6 py-3 text-lg font-mono tracking-widest shadow-raised">
         {code}
       </div>
       <button
         onClick={handleCopy}
-        className="rounded-full bg-foreground text-background px-5 py-2 text-sm font-medium"
+        className="rounded-full bg-accent text-accent-foreground px-5 py-2 text-sm font-medium shadow-raised transition hover:opacity-90 active:scale-95"
       >
         {copied ? "הועתק!" : "העתקת קישור הצטרפות"}
       </button>
@@ -87,7 +87,7 @@ export default function InviteCodeDisplay({
         <button
           onClick={handleRegenerate}
           disabled={regenerating}
-          className="text-xs text-zinc-500 underline disabled:opacity-50"
+          className="text-xs text-zinc-500 underline transition hover:text-zinc-800 dark:hover:text-zinc-300 active:scale-95 disabled:opacity-50 disabled:active:scale-100"
         >
           יצירת קוד חדש (מבטל את הקוד הישן)
         </button>
@@ -96,13 +96,16 @@ export default function InviteCodeDisplay({
         <button
           onClick={handleDeleteGroup}
           disabled={deleting}
-          className="text-xs text-red-600 underline disabled:opacity-50"
+          className="text-xs text-red-600 underline transition hover:text-red-700 active:scale-95 disabled:opacity-50 disabled:active:scale-100"
         >
           מחיקת הקבוצה לצמיתות
         </button>
       )}
       {error && <p className="text-sm text-red-600">{error}</p>}
-      <Link href={`/groups/${groupId}/chat`} className="text-sm text-zinc-500 mt-4">
+      <Link
+        href={`/groups/${groupId}/chat`}
+        className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300 mt-4"
+      >
         חזרה לצ&apos;אט
       </Link>
     </div>

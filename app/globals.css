@@ -3,11 +3,21 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* The app's one accent color — used for primary actions (submit/add/send
+     buttons, the active tab, the checked-item state) and nothing else, so
+     it actually reads as "the app's color" instead of competing with a
+     dozen ad-hoc ones. A deep oak green rather than a bright green, so it
+     sits inside the app's black/white/zinc palette instead of shouting
+     over it. */
+  --accent: #3f5c46;
+  --accent-foreground: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -16,6 +26,8 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+    --accent: #86a887;
+    --accent-foreground: #13200f;
   }
 }
 
@@ -33,5 +45,58 @@ body {
   textarea,
   select {
     font-size: 16px;
+  }
+}
+
+/* Soft-UI shadows: raised surfaces (cards, buttons) read as sitting just
+   above the page; inset surfaces (inputs) read as sunken into it. Both use
+   the same implied light source — slightly heavier below than above — so
+   they feel like one consistent material instead of two random effects. */
+@layer utilities {
+  .shadow-raised {
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.03),
+      0 6px 16px rgba(0, 0, 0, 0.06),
+      0 14px 32px rgba(0, 0, 0, 0.05),
+      0 -1px 1px rgba(0, 0, 0, 0.02);
+  }
+  .shadow-inset {
+    box-shadow:
+      inset 0 1px 3px rgba(0, 0, 0, 0.09),
+      inset 0 -1px 1px rgba(255, 255, 255, 0.6);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .shadow-raised {
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.35),
+      0 6px 18px rgba(0, 0, 0, 0.32),
+      0 14px 34px rgba(0, 0, 0, 0.24),
+      0 -1px 1px rgba(255, 255, 255, 0.02);
+  }
+  .shadow-inset {
+    box-shadow:
+      inset 0 1px 3px rgba(0, 0, 0, 0.45),
+      inset 0 -1px 1px rgba(255, 255, 255, 0.03);
+  }
+}
+
+/* Loading → content: content fades/slides in the moment a skeleton is
+   replaced by real data, instead of popping in instantly. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer utilities {
+  .animate-fade-in {
+    animation: fade-in 0.25s ease-out;
   }
 }

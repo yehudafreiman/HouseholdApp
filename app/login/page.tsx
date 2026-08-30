@@ -66,7 +66,7 @@ function LoginForm() {
 
   return (
     <div className="flex h-dvh items-center justify-center bg-zinc-50 dark:bg-black px-4">
-      <div className="w-full max-w-sm rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-950 p-8 shadow-sm">
+      <div className="w-full max-w-sm rounded-xl bg-white dark:bg-zinc-950 p-8 shadow-raised">
         <h1 className="text-xl font-semibold text-center mb-6">
           {mode === "login" ? "התחברות" : "הרשמה"}
         </h1>
@@ -83,7 +83,7 @@ function LoginForm() {
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="rounded-md border border-black/10 dark:border-white/15 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+                className="rounded-md bg-white dark:bg-zinc-900 shadow-inset px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
               />
             </div>
           )}
@@ -98,7 +98,7 @@ function LoginForm() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="rounded-md border border-black/10 dark:border-white/15 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+              className="rounded-md bg-zinc-200 dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
             />
           </div>
 
@@ -113,7 +113,7 @@ function LoginForm() {
               minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="rounded-md border border-black/10 dark:border-white/15 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+              className="rounded-md bg-zinc-200 dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
             />
           </div>
 
@@ -123,7 +123,7 @@ function LoginForm() {
           <button
             type="submit"
             disabled={pending}
-            className="mt-2 rounded-md bg-foreground text-background py-2 text-sm font-medium transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] disabled:opacity-50"
+            className="mt-2 rounded-md bg-accent text-accent-foreground py-2 text-sm font-medium shadow-raised transition hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
           >
             {pending ? "רגע..." : mode === "login" ? "התחבר" : "הירשם"}
           </button>
@@ -136,7 +136,7 @@ function LoginForm() {
             setInfo(null);
             setMode(mode === "login" ? "signup" : "login");
           }}
-          className="mt-4 w-full text-center text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+          className="mt-4 w-full text-center text-sm text-zinc-500 transition hover:text-zinc-800 dark:hover:text-zinc-200 active:scale-95"
         >
           {mode === "login" ? "אין לך חשבון? הירשם" : "יש לך כבר חשבון? התחבר"}
         </button>

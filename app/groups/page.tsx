@@ -33,7 +33,7 @@ export default async function GroupsPage({
   // plain visit — but ?manage=1 (from the group switcher's "+" link) opts
   // out, since that's the only way to reach create/join with one group.
   if (groups.length === 1 && !manage) {
-    redirect(`/groups/${groups[0].id}/chat`);
+    redirect(`/groups/${groups[0].id}/shopping`);
   }
 
   return (
@@ -45,8 +45,8 @@ export default async function GroupsPage({
           {groups.map((g) => (
             <Link
               key={g.id}
-              href={`/groups/${g.id}/chat`}
-              className="rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-900 px-4 py-3 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              href={`/groups/${g.id}/shopping`}
+              className="rounded-xl bg-white dark:bg-zinc-900 px-4 py-3 text-sm shadow-raised hover:shadow-lg transition active:scale-[0.98]"
             >
               {g.name}
             </Link>

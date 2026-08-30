@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { SHOPPING_CATEGORIES } from "@/lib/shopping";
 import { useGroupMeta } from "@/lib/hooks/use-group-meta";
 import GroupHeader from "@/components/group-header";
+import { CheckIcon, XIcon } from "@/components/icons";
 
 type ShoppingItemRow = {
   id: number;
@@ -83,7 +84,6 @@ export default function ShoppingList({
   const { data: meta } = useGroupMeta(currentUserId, currentUserEmail);
   const groups = meta?.groups ?? [];
   const profileMap = useMemo(() => meta?.profileMap ?? {}, [meta]);
-  const currentUsername = meta?.currentUsername ?? currentUserEmail ?? "אני";
 
   const { data: itemsData, isPending: itemsPending } = useQuery({
     queryKey: ITEMS_KEY(groupId),
@@ -389,7 +389,7 @@ export default function ShoppingList({
               <button
                 type="button"
                 onClick={handleClearChecked}
-                className="text-blue-600 dark:text-blue-400 hover:underline"
+                className="text-accent hover:underline"
               >
                 נקה מסומנים ({checkedCount})
               </button>
@@ -404,14 +404,14 @@ export default function ShoppingList({
             {[0, 1, 2].map((i) => (
               <div
                 key={i}
-                className="h-11 rounded-lg border border-black/10 dark:border-white/10 bg-zinc-100 dark:bg-zinc-900"
+                className="h-11 rounded-xl bg-zinc-100 dark:bg-zinc-900"
               />
             ))}
           </div>
         ) : (
-          <>
+          <div className="flex flex-col gap-5 animate-fade-in">
             {items.length === 0 && (
-              <p className="text-center text-sm text-zinc-400 mt-8">
+              <p className="text-center text-base text-zinc-400 mt-8">
                 הרשימה ריקה — הוסיפו את הפריט הראשון למטה.
               </p>
             )}
@@ -427,7 +427,7 @@ export default function ShoppingList({
                     return (
                       <div
                         key={item.id}
-                        className={`flex items-center gap-2 rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-zinc-900 px-3 py-2 ${
+                        className={`flex items-center gap-2 rounded-xl bg-white dark:bg-zinc-900 px-4 py-3 shadow-raised transition hover:shadow-md hover:bg-zinc-50 dark:hover:bg-zinc-800 active:scale-[0.98] ${
                           item.is_checked ? "opacity-50" : ""
                         }`}
                       >
@@ -439,17 +439,17 @@ export default function ShoppingList({
                           <span
                             className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs transition-colors ${
                               item.is_checked
-                                ? "border-foreground bg-foreground text-background"
+                                ? "border-accent bg-accent text-accent-foreground"
                                 : "border-black/10 dark:border-white/15"
                             }`}
                             aria-hidden="true"
                           >
-                            {item.is_checked && "✓"}
+                            {item.is_checked && <CheckIcon className="h-3 w-3" />}
                           </span>
                           <span className="flex-1 min-w-0">
                             <span className="flex items-center gap-2 flex-wrap">
                               <span
-                                className={`text-sm ${item.is_checked ? "line-through" : ""}`}
+                                className={`text-base ${item.is_checked ? "line-through" : ""}`}
                               >
                                 {item.name}
                               </span>
@@ -462,12 +462,12 @@ export default function ShoppingList({
                                 </span>
                               )}
                               {categorizingIds.has(item.id) && (
-                                <span className="text-[10px] text-zinc-400 animate-pulse">
+                                <span className="text-xs text-zinc-400 animate-pulse">
                                   מסווג...
                                 </span>
                               )}
                             </span>
-                            <span className="block text-[10px] text-zinc-400">
+                            <span className="block text-xs text-zinc-400">
                               {item.is_checked
                                 ? `נקנה ע"י ${checkedByName ?? "משתמש"}`
                                 : `נוסף ע"י ${addedByName}`}
@@ -476,10 +476,10 @@ export default function ShoppingList({
                         </button>
                         <button
                           onClick={() => handleDeleteItem(item.id)}
-                          className="text-zinc-400 hover:text-red-600 text-sm shrink-0 px-1"
+                          className="text-zinc-400 hover:text-red-600 shrink-0 px-1 transition active:scale-90"
                           aria-label="מחיקת פריט"
                         >
-                          ✕
+                          <XIcon className="h-4 w-4" />
                         </button>
                       </div>
                     );
@@ -487,32 +487,32 @@ export default function ShoppingList({
                 </div>
               </div>
             ))}
-          </>
+          </div>
         )}
       </div>
 
       {suggestions.length > 0 && (
         <div className="flex items-center gap-2 overflow-x-auto border-t border-black/10 dark:border-white/10 px-3 py-2">
-          <span className="shrink-0 text-[11px] text-zinc-400">קונים לעיתים קרובות:</span>
+          <span className="shrink-0 text-xs text-zinc-400">קונים לעיתים קרובות:</span>
           {suggestions.map((s) => (
             <span
               key={s.name}
-              className="shrink-0 flex items-center rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 text-xs whitespace-nowrap"
+              className="shrink-0 flex items-center overflow-hidden rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 text-xs whitespace-nowrap"
             >
               <button
                 type="button"
                 onClick={() => handleQuickAdd(s)}
-                className="px-3 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                className="px-3 py-1 transition hover:bg-zinc-50 dark:hover:bg-zinc-800 active:scale-95"
               >
                 + {s.name}
               </button>
               <button
                 type="button"
                 onClick={() => handleDismissSuggestion(s)}
-                className="px-2 py-1 text-zinc-400 hover:text-red-600"
+                className="px-2 py-1 text-zinc-400 transition hover:text-red-600 active:scale-90"
                 aria-label={`הסרת ההצעה ${s.name}`}
               >
-                ✕
+                <XIcon className="h-3 w-3" />
               </button>
             </span>
           ))}
@@ -521,42 +521,46 @@ export default function ShoppingList({
 
       <form
         onSubmit={handleAdd}
-        className="flex flex-col gap-2 border-t border-black/10 dark:border-white/10 p-3"
+        className="flex items-center gap-2 border-t border-black/10 dark:border-white/10 p-3"
       >
-        <div className="flex items-center gap-2">
+        {/* One bordered container instead of three separate boxes — name is
+            the primary field (flex-1), quantity/price are secondary,
+            visually demoted via width and a divider instead of their own
+            border, so the row reads as one "add item" control, not three. */}
+        <div className="flex flex-1 min-w-0 items-center rounded-full bg-white dark:bg-zinc-900 shadow-inset focus-within:ring-2 focus-within:ring-black/20 dark:focus-within:ring-white/20">
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="הוספת פריט..."
-            className="min-w-0 flex-1 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+            className="min-w-0 flex-1 rounded-full px-4 py-2 text-base bg-transparent outline-none"
           />
+          <span className="h-5 w-px shrink-0 bg-black/10 dark:bg-white/15" aria-hidden="true" />
           <input
             type="text"
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
             placeholder="כמות"
-            className="w-16 min-w-0 shrink-0 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+            className="w-12 min-w-0 shrink-0 px-2 py-2 text-sm text-center text-zinc-500 bg-transparent outline-none"
           />
+          <span className="h-5 w-px shrink-0 bg-black/10 dark:bg-white/15" aria-hidden="true" />
           <input
             type="number"
             inputMode="decimal"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             placeholder="₪"
-            className="w-14 min-w-0 shrink-0 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20"
+            className="w-12 min-w-0 shrink-0 px-2 py-2 text-sm text-center text-zinc-500 bg-transparent outline-none"
           />
-          <button
-            type="submit"
-            disabled={submitting || !name.trim()}
-            className="shrink-0 rounded-full bg-foreground text-background px-5 py-2 text-sm font-medium disabled:opacity-50 whitespace-nowrap"
-          >
-            הוספה
-          </button>
         </div>
-        <span className="text-[11px] text-zinc-500 px-2">
-          מחובר/ת בתור {currentUsername}
-        </span>
+        <button
+          type="submit"
+          disabled={submitting || !name.trim()}
+          aria-label="הוספת פריט"
+          className="shrink-0 flex h-11 w-11 items-center justify-center rounded-full bg-accent text-accent-foreground text-2xl leading-none shadow-raised transition hover:opacity-90 active:scale-90 disabled:opacity-50 disabled:active:scale-100"
+        >
+          +
+        </button>
       </form>
     </div>
   );
