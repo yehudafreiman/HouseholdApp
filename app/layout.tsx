@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Keeps",
-  description: "Groups, Chat & Shopping",
+  description: "Household App — Groups, Chat & Shopping",
 };
 
 export default function RootLayout({
