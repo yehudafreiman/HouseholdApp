@@ -178,7 +178,7 @@ Returning to a page you've already visited in the same session (chat → shoppin
 
 ```
 app/
-  icon.svg                               App icon / favicon
+  icon.png, apple-icon.png                App icon / favicon (static files)
   login/page.tsx                          Sign up / sign in
   groups/page.tsx                         Group picker / create / join
   groups/create-group-form.tsx
