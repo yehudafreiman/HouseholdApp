@@ -1,4 +1,4 @@
-# Keeps
+# HouseholdApp
 
 A realtime household-coordination app built with Next.js (App Router) and Supabase — email/password auth, multiple isolated household groups, Postgres-backed chat with Row Level Security and live delivery via Supabase Realtime, and a shared shopping list (plus a non-urgent wishlist) with AI-powered item categorization.
 
