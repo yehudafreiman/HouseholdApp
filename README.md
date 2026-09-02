@@ -55,7 +55,7 @@ A realtime household-coordination app built with Next.js (App Router) and Supaba
 
 ```bash
 git clone <repository-url>
-cd keeps
+cd HouseholdApp
 ```
 
 (`<repository-url>` is this repo's clone URL — copy it from GitHub's **Code** button.)
