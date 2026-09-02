@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Keeps",
+  title: "HouseholdApp",
   description: "Household App — Groups, Chat & Shopping",
 };
 
