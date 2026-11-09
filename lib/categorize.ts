@@ -75,7 +75,10 @@ const SYSTEM_PROMPT = [
 export async function categorizeItem(name: string): Promise<ShoppingCategory> {
   const response = await anthropic.messages.create({
     model: "claude-sonnet-5",
-    max_tokens: 200,
+    max_tokens: 256,
+    // Classification is a single short answer — without this, Sonnet 5's
+    // default adaptive thinking can use up max_tokens and cut the JSON off.
+    thinking: { type: "disabled" },
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: name }],
     output_config: {
