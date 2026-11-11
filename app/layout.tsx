@@ -29,7 +29,9 @@ export default function RootLayout({
       dir="rtl"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="overflow-hidden">
+      {/* Browser extensions (e.g. Grammarly) add attributes to <body> before
+          React loads; this silences that harmless mismatch warning. */}
+      <body className="overflow-hidden" suppressHydrationWarning>
         <QueryProvider>{children}</QueryProvider>
       </body>
     </html>
